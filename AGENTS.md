@@ -16,7 +16,7 @@ Use plain, simplified technical English. Prefer the shortest set of statements n
 
 Do not add filler, rhetorical flourishes, motivational language, jokes, or stylistic embellishment.
 
-Do not repeat information unless repetition materially improves understanding.
+Repeat information only when applying it in a new context or deliberately reinforcing understanding or retention. A new chapter is not, by itself, a reason to repeat earlier material.
 
 A section may be one sentence when one sentence is sufficient. Do not expand a section merely to make it feel complete.
 
@@ -40,15 +40,27 @@ When a distinction is important, make the distinction explicit rather than relyi
 
 ## Organization
 
-Organize chapters around the natural conceptual progression of the subject.
+Before drafting a guide, outline its chapters to establish the overall learning progression. Before drafting each chapter, outline its sections and any needed subsections to work out how that part of the progression will be taught.
 
-Do not force every chapter into the same internal structure. Create sections where they improve comprehension; collapse them when they do not.
+Use these outlines to resolve ordering, prerequisites, and conceptual boundaries before writing the content in full. Together, they should tell a coherent learning story in which each part builds toward the intended mental model.
 
-Before writing a chapter's content, first propose its section and subsection headings.
+### Guide and Chapter Structure
 
-Do not write the chapter content until the user approves the outline.
+Establish the reader's starting knowledge and what the guide should enable them to understand or do. Give each chapter a distinct contribution toward that outcome.
 
-After approval, use the approved outline as the starting structure, but collapse, reorder, or rename sections when doing so clearly improves the notes.
+Compare proposed coverage with existing chapters. Identify what new understanding each chapter adds and which earlier concepts it assumes.
+
+Choose an organizing structure that fits the subject: conceptual dependencies, a process, cause and effect, a hierarchy, or another meaningful relationship. Do not impose a lifecycle or copy a reference document's organization merely because it is available. Preserve cycles and interacting relationships when a linear sequence would misrepresent them.
+
+Split chapters where there is a useful conceptual boundary and each resulting chapter has a coherent learning purpose. Length informs pacing; it does not determine the boundary. Keep material together when splitting it would fragment an explanation or require substantial repetition.
+
+### Sections and Subsections
+
+Within each chapter, order sections by what the learner needs to understand next. When variations depend on a shared mechanism, establish that mechanism through a simple, complete case before introducing the variations.
+
+Use section boundaries to distinguish meaningful learning steps. Use subsections when a step contains parts that benefit from separate treatment. Important distinctions may deserve separate sections even when their explanations are short; closely connected ideas may fit best together.
+
+Do not target a particular number or size of chapters, sections, or subsections. Do not force parallel topics into matching structures.
 
 Each section should have a clear purpose:
 
@@ -59,7 +71,17 @@ Each section should have a clear purpose:
 * Compare related concepts
 * Summarize a useful mental model
 
-Avoid sections that merely restate previous material.
+Headings should identify the actual teaching purpose. When revisiting a familiar concept, make its new role clear rather than presenting its definition again.
+
+### Outline Review and Approval
+
+Before presenting an outline, walk through it from the learner's perspective: what must they know on entry to each part, what will they learn there, and why does it belong at that point? Resolve missing prerequisites, including those hidden in examples, terminology, and comparisons. Check for overlapping purposes and topics included only for apparent completeness.
+
+Take responsibility for recommending a sound scope and progression. Ask the learner about their goals and familiarity when needed; do not rely on them to detect gaps in a subject they are learning.
+
+Present the chapter outline for user approval before writing its content.
+
+After approval, use the approved outline as the starting structure, but collapse, reorder, or rename sections when doing so clearly improves the notes.
 
 ## Header Structure
 
