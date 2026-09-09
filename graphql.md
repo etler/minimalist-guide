@@ -1053,3 +1053,312 @@ The internal representation is not standardized.
 | Schema semantics       | Server architecture            |
 
 **Core idea:** SDL defines the GraphQL schema; the implementation decides how that schema is constructed and represented.
+
+Yes. There was substantial repetition in the draft, particularly around schema-defined validity, fragments, and variables. I also had several sections that restated distinctions already established rather than adding reference value.
+
+The biggest reductions are:
+
+* Remove repeated explanations of fields being schema-defined.
+* Collapse basic selection-set material.
+* Treat literal values as a compact syntax reference rather than re-explaining their typing.
+* Combine variable rules instead of separately restating compatibility/default behavior.
+* Reduce fragment sections to the distinctions that matter: named vs. inline, type conditions, composition/cycles.
+* Remove the final "GraphQL and the Schema" section because it largely repeats Chapter 2.
+* Remove the final mental-model section's repetition of the chapter; retain only a compact summary.
+
+The resulting chapter should be closer to this:
+
+## Chapter 3 — GraphQL Query Language
+
+### 1. Documents and Operations
+
+#### 1.1 Documents
+
+A GraphQL document contains operation definitions and fragment definitions.
+
+#### 1.2 Operations
+
+An operation is an executable unit:
+
+```graphql
+query { ... }
+mutation { ... }
+subscription { ... }
+```
+
+The operation type determines its execution semantics.
+
+#### 1.3 Named and Anonymous Operations
+
+Operations may be named:
+
+```graphql
+query GetUser {
+  user(id: "123") {
+    name
+  }
+}
+```
+
+or anonymous:
+
+```graphql
+{
+  user(id: "123") {
+    name
+  }
+}
+```
+
+An anonymous operation is allowed only when the document contains one operation.
+
+A document containing multiple operations requires the request to identify the operation by name.
+
+### 2. Selection Sets
+
+#### 2.1 Fields and Nested Selections
+
+A selection set contains fields, with nested selection sets for object-valued fields:
+
+```graphql
+query {
+  post(id: "123") {
+    title
+    author {
+      name
+    }
+  }
+}
+```
+
+The available selections are determined by the schema type at each level.
+
+#### 2.2 Arguments
+
+Fields may provide arguments:
+
+```graphql
+posts(topicId: "42", limit: 20) {
+  title
+}
+```
+
+Arguments supply values to arguments declared by the schema.
+
+### 3. Values and Variables
+
+#### 3.1 Value Literals
+
+GraphQL supports these literal value forms:
+
+| Value        | Example             |
+| ------------ | ------------------- |
+| Int          | `20`                |
+| Float        | `3.14`              |
+| String       | `"text"`            |
+| Boolean      | `true`              |
+| Null         | `null`              |
+| Enum         | `NEWEST`            |
+| List         | `["a", "b"]`        |
+| Input object | `{ topicId: "42" }` |
+
+The expected schema type determines whether a literal is valid.
+
+#### 3.2 Variables
+
+Variables provide values separately from the document:
+
+```graphql
+query GetPosts($limit: Int!) {
+  posts(limit: $limit) {
+    id
+  }
+}
+```
+
+Variables are declared on the operation and supplied by the request.
+
+#### 3.3 Variable Defaults
+
+Variables may have defaults:
+
+```graphql
+query GetPosts($limit: Int! = 20) {
+  posts(limit: $limit) {
+    id
+  }
+}
+```
+
+The default is used when the variable is not provided.
+
+#### 3.4 Variable Type Compatibility
+
+A variable can only be used where its declared type is compatible with the argument's type. This is validated before execution.
+
+### 4. Aliases and Field Merging
+
+#### 4.1 Aliases
+
+An alias changes a field's response name without changing the field selected:
+
+```graphql
+{
+  displayName: name
+}
+```
+
+#### 4.2 Field Merging
+
+Selections with the same response name are merged when their field and arguments are compatible:
+
+```graphql
+{
+  posts(sort: NEWEST) {
+    id
+  }
+
+  posts(sort: NEWEST) {
+    title
+  }
+}
+```
+
+Conceptually:
+
+```graphql
+{
+  posts(sort: NEWEST) {
+    id
+    title
+  }
+}
+```
+
+Argument order does not matter.
+
+#### 4.3 Field Conflicts
+
+Selections with the same response name but incompatible fields or arguments produce a validation error.
+
+Aliases can give them different response names.
+
+### 5. Fragments
+
+#### 5.1 Named Fragments
+
+A named fragment defines a reusable selection set:
+
+```graphql
+fragment UserFields on User {
+  id
+  name
+}
+```
+
+It is included with a fragment spread:
+
+```graphql
+user(id: "123") {
+  ...UserFields
+}
+```
+
+#### 5.2 Inline Fragments
+
+An inline fragment provides type-specific selections without defining a reusable fragment:
+
+```graphql
+search {
+  ... on Post {
+    title
+  }
+}
+```
+
+#### 5.3 Type Conditions
+
+`on Type` is a type condition. The fragment's selections apply when the current value is compatible with that type.
+
+Object, interface, and union types can be used as type conditions.
+
+#### 5.4 Fragment Composition
+
+Fragments can spread other fragments. Fragment spreads must be type-compatible with their location and must not form cycles.
+
+### 6. Directives
+
+#### 6.1 Directive Applications
+
+Directives are applied with `@` and may take arguments:
+
+```graphql
+name @include(if: $showName)
+```
+
+The directive definition determines where it may be used and what arguments it accepts.
+
+#### 6.2 Built-in Execution Directives
+
+`@skip` omits a selection when `if` is true.
+
+`@include` includes a selection only when `if` is true.
+
+Both can apply to fields, fragment spreads, and inline fragments.
+
+#### 6.3 Type Selection vs. Runtime Conditions
+
+| Mechanism            | Based on             |
+| -------------------- | -------------------- |
+| Inline fragment      | Current GraphQL type |
+| `@include` / `@skip` | Runtime Boolean      |
+
+An inline fragment is type-directed selection, not general conditional control flow.
+
+### 7. Syntax Details
+
+#### 7.1 Names and Keywords
+
+GraphQL names begin with `_` or an ASCII letter and may then contain `_`, letters, and digits.
+
+`query`, `mutation`, and `subscription` are operation-type keywords.
+
+#### 7.2 Whitespace, Commas, and Comments
+
+Whitespace and line breaks do not determine structure. Commas are optional and insignificant. Comments begin with `#` and run to the end of the line.
+
+### 8. GQL and the Schema
+
+#### 8.1 Schema-Defined Validity
+
+The schema determines which fields, arguments, and types are valid in a GraphQL document.
+
+#### 8.2 Parsing vs. Validation
+
+Parsing checks GraphQL syntax. Validation checks whether the parsed document is valid against the schema.
+
+```mermaid
+flowchart LR
+    D[GraphQL Document] --> P[Parse]
+    P --> V[Validate]
+    S[Schema] --> V
+    V -->|Valid| E[Execution]
+    V -->|Invalid| X[Reject]
+```
+
+### 9. Chapter Summary
+
+GraphQL query language is a declarative language for selecting data from a schema.
+
+| Construct      | Purpose                               |
+| -------------- | ------------------------------------- |
+| Operation      | Defines an executable operation       |
+| Selection set  | Selects fields                        |
+| Argument       | Supplies a field input                |
+| Variable       | Supplies runtime input                |
+| Alias          | Changes a response name               |
+| Fragment       | Reuses selections                     |
+| Type condition | Restricts fragment selections by type |
+| Directive      | Modifies an executable construct      |
+
+The document describes **what is requested**; execution determines **what that request does**.
