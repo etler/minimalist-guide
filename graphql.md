@@ -1362,3 +1362,51 @@ GraphQL query language is a declarative language for selecting data from a schem
 | Directive      | Modifies an executable construct      |
 
 The document describes **what is requested**; execution determines **what that request does**.
+
+## Chapter 4 — GraphQL Execution
+
+### 1. Preparing Runtime Variables
+
+#### 1.1 Coercing Runtime Variable Values
+#### 1.2 Omitted Variables, Explicit Null, and Defaults
+
+### 2. Collecting Fields for the Current Object
+
+#### 2.1 Filtering Selections Before Resolution
+#### 2.2 Grouping Selections by Response Name
+
+### 3. Resolving a Collected Field
+
+#### 3.1 Coercing Field Arguments and Applying Argument Defaults
+#### 3.2 Root and Parent Values
+#### 3.3 Field Arguments vs. Shared Context
+#### 3.4 Synchronous and Asynchronous Resolvers
+
+### 4. Completing the Resolved Value
+
+#### 4.1 Resolved Values vs. Response Values
+#### 4.2 Scalar and Enum Result Coercion
+#### 4.3 Completing Each List Item
+#### 4.4 Object Results: Repeating Collection, Resolution, and Completion
+#### 4.5 Interfaces and Unions: Determining the Object Type Before Recursing
+
+### 5. Nullability and Errors
+
+#### 5.1 Request Errors vs. Execution Errors
+#### 5.2 Valid Nulls, Failed Fields, and Partial Data
+#### 5.3 Non-Null Propagation Through Lists and Objects to the Root
+#### 5.4 Error Paths After Null Propagation
+
+### 6. Query Execution
+
+### 7. Mutation Execution
+
+#### 7.1 Side Effects
+#### 7.2 Serial Top-Level Fields and Nested Completion
+#### 7.3 Failures and Transaction Boundaries
+
+### 8. Subscription Execution
+
+#### 8.1 Establishing a Source Stream
+#### 8.2 Executing Selections for Each Event
+#### 8.3 Completion and Cancellation
