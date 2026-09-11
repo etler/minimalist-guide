@@ -4,30 +4,21 @@
 
 ### 1. What Is GraphQL?
 
-GraphQL is a specification for a typed API. It defines a schema model, the GraphQL query language (GQL), validation, execution semantics, and response semantics.
+**GraphQL** is a specification for a typed API. It defines how an API describes its data, how clients request that data, and how the server evaluates requests and returns results.
 
-It does not require a particular transport, server framework, database, or resolver implementation.
-
-```mermaid
-flowchart LR
-    G[GraphQL] --> S[Schema Model]
-    G --> Q[GQL]
-    G --> V[Validation]
-    G --> E[Execution]
-    G --> R[Response Semantics]
-```
+It does not require a particular transport, server framework, database, or data-access implementation.
 
 ### 2. Schema
 
 #### 2.1 GraphQL Schema
 
-A GraphQL schema is the specification-defined, typed structure of an API: its types, fields, arguments, and root operation types.
+A **GraphQL schema** is the typed structure of an API.
 
-The schema is required; SDL is not.
+**SDL (Schema Definition Language)** is GraphQL's language for declaring a schema. The schema is required; using SDL to construct it is optional.
 
 #### 2.2 Schema Model
 
-The GraphQL specification defines an abstract schema model that all GraphQL schemas must conform to.
+The schema model defines the kinds of types a schema can contain and the rules for combining them.
 
 Implementations may represent that model internally however they want.
 
@@ -40,23 +31,29 @@ flowchart LR
 
 #### 2.3 SDL
 
-SDL (Schema Definition Language) is GraphQL's standardized language for expressing the schema model.
-
 A server does not have to accept SDL or use it internally.
 
 A custom schema-definition mechanism is compatible with GraphQL if it produces a valid GraphQL schema.
 
-SDL describes the GraphQL schema, not implementation details such as resolver code or database access.
+SDL describes the GraphQL schema, not implementation details such as application code or database access.
 
-### 3. Query Language (GQL)
+### 3. GraphQL Documents
 
-#### 3.1 GQL Is Standardized
+#### 3.1 The Document Language
 
-GQL is the actual GraphQL query language defined by the specification.
+GraphQL expresses **operations**: instructions to read data (**queries**), request changes (**mutations**), or receive updates (**subscriptions**).
 
-A GraphQL implementation must support GraphQL documents written in GQL; a server-specific query syntax is not a replacement for GQL.
+A **GraphQL document** is source text written in GraphQL.
+
+A GraphQL implementation must support the standard document syntax and semantics. A server-specific syntax cannot replace them.
 
 #### 3.2 Basic Structure
+
+A **field** is a named piece of data exposed by the API. A **selection set** groups requested fields inside braces.
+
+An **argument** supplies an input to a field. A **variable** supplies a value separately from the document and is referenced with `$`.
+
+This query names its operation `GetUser`. Its variable uses **`ID`**, the identifier type; `!` makes it **non-null** and required.
 
 ```graphql
 query GetUser($id: ID!) {
@@ -72,39 +69,42 @@ query GetUser($id: ID!) {
 | `query`      | Operation type |
 | `GetUser`    | Operation name |
 | `$id`        | Variable       |
+| `id: $id`    | Field argument supplied by a variable |
 | `user`       | Field          |
 | `id`, `name` | Nested fields  |
 | `{ ... }`    | Selection set  |
 
 #### 3.3 Object vs. Leaf Fields
 
-The return type of a field determines whether it can have a selection set.
+An **object type** defines selectable fields. A leaf type represents a value without child fields.
+
+A **scalar** holds a single value, such as text (**`String`**) or an integer (**`Int`**). An **enum** holds one of a fixed set of named values. Both are leaf types.
+
+The return type of a field determines whether it needs a selection set.
 
 | Return type | Selection set |
 | ----------- | ------------- |
 | Object      | Required      |
 | Leaf type   | Forbidden     |
 
-Scalars and enums are leaf types.
-
 #### 3.4 The Important Asymmetry
 
-| Schema                                            | GQL                                        |
+| Schema                                            | GraphQL documents                          |
 | ------------------------------------------------- | ------------------------------------------ |
 | GraphQL standardizes the schema model             | GraphQL standardizes the language itself   |
-| Implementations may construct schemas differently | Implementations must support GQL semantics |
+| Implementations may construct schemas differently | Implementations must support GraphQL document semantics |
 | SDL is one representation                         | Parsed representations may vary internally |
 
 ### 4. Request
 
-#### 4.1 A GQL Document Is Not a Request
+#### 4.1 A GraphQL Document Is Not a Request
 
-A GQL document describes an operation; a request submits that operation for execution.
+A GraphQL document describes an operation; a **request** submits that operation for execution.
 
 A GraphQL request can provide:
 
 * A document
-* An operation selection
+* The name of the operation to execute
 * Variable values
 
 The GraphQL specification defines these concepts, but not a universal in-process API for passing them around.
@@ -123,7 +123,7 @@ execute({
 
 The API and in-memory representations are implementation-specific.
 
-The `document` may be a parsed representation rather than GQL text, but it must faithfully represent a GraphQL document.
+The `document` may be a parsed representation rather than GraphQL source text, but it must faithfully represent a GraphQL document.
 
 Variable values must satisfy the variable definitions in the document.
 
@@ -135,13 +135,13 @@ A transport can deliver a request through HTTP, WebSockets, an in-process functi
 
 #### 4.4 GraphQL over HTTP
 
-GraphQL over HTTP is a separate standard for carrying GraphQL requests and responses over HTTP.
+**GraphQL over HTTP** is a separate standard for carrying GraphQL requests and responses over HTTP.
 
 It is widely implemented, but HTTP is not required by core GraphQL.
 
 ```mermaid
 flowchart LR
-    G[GQL Document] --> R[GraphQL Request]
+    G[GraphQL Document] --> R[GraphQL Request]
     R --> T[Transport]
     T --> H[HTTP]
     T --> W[WebSocket]
@@ -152,12 +152,12 @@ flowchart LR
 
 #### 5.1 What Execution Is
 
-Execution evaluates a valid GraphQL operation against a schema according to GraphQL's execution semantics.
+Document **validation** checks an operation against the schema and GraphQL's document rules. **Execution** evaluates a validated operation to produce a result.
 
 ```mermaid
 flowchart LR
     S[Schema] --> E[Execution]
-    Q[GQL Operation] --> E
+    Q[GraphQL Operation] --> E
     V[Variables] --> E
     I[Field Implementations] --> E
     E --> R[Execution Result]
@@ -165,15 +165,15 @@ flowchart LR
 
 #### 5.2 What the Specification Defines
 
-The specification defines how execution handles:
+The specification defines how execution selects fields, applies inputs, and builds nested results. It also defines:
 
-* Field selection
-* Arguments and variables
-* Nested selections
-* Aliases and fragments
-* Nullability
-* Field errors
-* Value completion
+| Concept | Role |
+| --- | --- |
+| **Alias** | Client-chosen name for a field in the response |
+| **Fragment** | Group of selections that can be reused or applied to particular types |
+| **Nullability** | Whether a value can be null |
+| **Execution error** | Failure while evaluating a field |
+| **Value completion** | Converting a field's result into the response value required by its type |
 
 Different conforming execution engines should therefore have the same GraphQL-level semantics for equivalent inputs.
 
@@ -196,7 +196,7 @@ These application-specific implementations are commonly called **resolvers**.
 
 #### 6.1 Execution Result
 
-Execution produces a GraphQL result containing `data`, errors, or both as appropriate.
+An **execution result** contains **`data`** and includes **`errors`** when fields fail. A **request error result** contains errors without data when the request cannot be executed.
 
 The `data` structure follows the selection structure of the operation.
 
@@ -214,7 +214,7 @@ flowchart LR
 
 GraphQL defines error semantics and a structured error representation.
 
-An error contains at least `message` and may include `locations`, `path`, and `extensions`.
+Every error has a **`message`** string. Other entries identify document positions (**`locations`**), a position in the response (**`path`**), or application metadata (**`extensions`**). Their presence depends on the error.
 
 Errors are part of the GraphQL contract, not purely server-specific behavior.
 
@@ -232,7 +232,8 @@ The transport determines how the response is serialized and transmitted.
 flowchart TB
     subgraph CORE["GraphQL Core"]
         S[Schema Model]
-        G[GQL]
+        SDL[SDL]
+        G[GraphQL Document]
         V[Validation]
         E[Execution Semantics]
         R[Response Semantics]
@@ -244,8 +245,7 @@ flowchart TB
         RES[Resolvers]
     end
 
-    subgraph EXT["Separate Standards / Transports"]
-        SDL[SDL]
+    subgraph EXT["Separate Transport Standard"]
         HTTP[GraphQL over HTTP]
     end
 
@@ -261,16 +261,16 @@ flowchart TB
 | Area           | Core GraphQL        |
 | -------------- | ------------------- |
 | Schema         | Schema model        |
-| Query language | GQL                 |
+| Documents      | Syntax and semantics |
 | Validation     | Validation rules    |
 | Execution      | Execution semantics |
 | Response       | Response semantics  |
 
-#### 7.2 What Is Standardized Separately
+#### 7.2 Optional Standardized Mechanisms
 
 | Component         | Role                                        |
 | ----------------- | ------------------------------------------- |
-| SDL               | Standard language for expressing schemas    |
+| SDL               | Core GraphQL language for expressing schemas |
 | GraphQL over HTTP | Standard for transporting GraphQL over HTTP |
 
 #### 7.3 What Is Implementation-Specific
@@ -278,7 +278,7 @@ flowchart TB
 * Schema construction
 * Internal schema representation
 * In-process request APIs
-* Internal GQL representation
+* Internal document representation
 * Resolver implementations
 * Database and service integration
 
@@ -295,7 +295,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    S[Schema] --> G[GQL]
+    S[Schema] --> G[GraphQL Document]
     G --> R[Request]
     R --> E[Execution]
     E --> O[Response]
@@ -305,14 +305,14 @@ flowchart LR
 | --------- | ------------------------------ | ------------------------------------- |
 | Schema    | Schema model                   | Construction and representation       |
 | SDL       | SDL language                   | Whether the server accepts or uses it |
-| GQL       | Language and semantics         | Parser and internal representation    |
+| Documents | Syntax and semantics         | Parser and internal representation    |
 | Request   | Request concepts and semantics | In-process API and transport          |
 | Execution | Execution semantics            | Engine implementation and resolvers   |
 | Response  | Response semantics             | Serialization and transport           |
 
 The central asymmetry:
 
-> **GraphQL standardizes the schema model, but it standardizes GQL itself as a language.**
+> GraphQL standardizes both the schema model and document syntax. Schema construction and internal document representations remain implementation choices.
 
 The surrounding mechanisms can vary, provided their GraphQL behavior conforms to the specification.
 
@@ -322,7 +322,11 @@ The surrounding mechanisms can vary, provided their GraphQL behavior conforms to
 
 #### 1.1 GraphQL Schema
 
-A GraphQL schema is a typed description of an API: its types, fields, arguments, directives, and root operation types.
+A schema describes the API's types, fields, and arguments.
+
+A **root operation type** is an object type whose fields are the entry points for queries, mutations, or subscriptions. Their conventional names are `Query`, `Mutation`, and `Subscription`.
+
+A **directive** is an annotation on a schema element or operation syntax. It carries metadata or instructions for processing that element.
 
 #### 1.2 SDL as a Schema Representation
 
@@ -364,7 +368,7 @@ A field definition has the form:
 name: Type
 ```
 
-The type may be a named type or a type modified by `[]` and `!`.
+A **named type** is referenced by its name, such as `String` or `Post`. **Wrapping types** modify another type: `[]` makes a **list**; `!` disallows null.
 
 ```graphql
 name: String!
@@ -385,7 +389,7 @@ This creates a relationship between `Post` and `User`.
 
 #### 2.4 Object Type Extensions
 
-An existing object type can be extended:
+A **type extension** adds definitions to an existing type:
 
 ```graphql
 type User {
@@ -408,16 +412,16 @@ GraphQL defines five built-in scalar types:
 | Scalar    | Represents            |
 | --------- | --------------------- |
 | `Int`     | Integer               |
-| `Float`   | Floating-point number |
+| **`Float`** | Floating-point number |
 | `String`  | Text                  |
-| `Boolean` | `true` or `false`     |
+| **`Boolean`** | `true` or `false`     |
 | `ID`      | Identifier            |
 
 Scalars are leaf types, so they cannot have selection sets.
 
 #### 3.2 Custom Scalars
 
-A schema can define its own scalar types:
+A schema can define **custom scalars**:
 
 ```graphql
 scalar DateTime
@@ -427,15 +431,7 @@ This declares `DateTime` as a scalar; the implementation defines how its values 
 
 #### 3.3 Scalar Extensions
 
-A custom scalar can also be extended:
-
-```graphql
-scalar DateTime
-
-extend scalar DateTime
-```
-
-The extension mechanism allows schema definitions to be assembled from multiple SDL documents.
+**Scalar extensions** add directives to existing scalars. Section 7.6 shows an example.
 
 #### 3.4 Enum Types
 
@@ -449,7 +445,7 @@ enum PostSort {
 }
 ```
 
-Enum names follow GraphQL `Name` syntax. Uppercase is a convention, not a requirement.
+Enum names are GraphQL identifiers. Uppercase is a convention, not a requirement.
 
 #### 3.5 Enum Extensions
 
@@ -475,9 +471,7 @@ extend enum PostSort {
 name: String!
 ```
 
-For an output field, `!` means the value cannot be `null` when the field is selected.
-
-For an input field, `!` also makes the field required: it cannot be omitted or set to `null`.
+For a selected field, `!` means the value cannot be `null`.
 
 #### 4.2 Lists
 
@@ -504,9 +498,11 @@ A list may contain `null` elements unless its element type is Non-Null.
 
 ### 5. Input Types
 
+**Input types** describe values supplied to fields. **Output types** describe values returned by fields.
+
 #### 5.1 Input Object Definitions
 
-Input objects define structured values supplied to fields:
+**Input objects** define structured values supplied to fields:
 
 ```graphql
 input PostFilter {
@@ -517,13 +513,15 @@ input PostFilter {
 
 #### 5.2 Input Fields
 
-Input fields use the same type syntax as output fields, but must use input types.
+**Input fields** use the same type syntax as output fields, but must use input types.
 
 An input field is nullable and optional by default.
 
-`!` makes it required.
+A non-null input field cannot be null. Without a default, it also cannot be omitted.
 
 #### 5.3 Input vs. Output Types
+
+An **interface** describes fields shared by implementing object types. A **union** lists possible object types for a result. Both are output types; Section 6 covers their definitions.
 
 |             | Input types                   | Output types                                |
 | ----------- | ----------------------------- | ------------------------------------------- |
@@ -679,7 +677,9 @@ extend union SearchResult = Comment
 
 #### 7.1 Directive Definitions
 
-A directive definition declares its name, arguments, whether it is repeatable, and its allowed locations:
+A **directive definition** declares its name, arguments, and allowed locations. The optional **`repeatable`** keyword permits multiple applications at one location.
+
+A **directive location** identifies where the annotation can appear in GraphQL syntax. `FIELD_DEFINITION` permits annotations on field declarations:
 
 ```graphql
 directive @auth(role: String!) on FIELD_DEFINITION
@@ -696,8 +696,8 @@ directive @name(arguments) repeatable? on LOCATION | LOCATION | ...
 A directive is applied by placing `@name` after the construct at an allowed location:
 
 ```graphql
-type Post @auth(role: "admin") {
-  title: String!
+type Post {
+  title: String! @auth(role: "admin")
 }
 ```
 
@@ -723,7 +723,7 @@ This means `@foo` may be used on object fields, object type definitions, or inpu
 
 GraphQL defines a fixed set of directive locations.
 
-**Schema locations:**
+Schema locations:
 
 | Location                 | Applies to                             |
 | ------------------------ | -------------------------------------- |
@@ -739,7 +739,9 @@ GraphQL defines a fixed set of directive locations.
 | `INPUT_OBJECT`           | Input object definition                |
 | `INPUT_FIELD_DEFINITION` | Input object field definition          |
 
-**Executable GQL locations:**
+Executable directive locations:
+
+A **fragment spread** inserts a named fragment's selections. An **inline fragment** writes its selections at the use site without a separate definition.
 
 | Location          | Applies to            |
 | ----------------- | --------------------- |
@@ -775,11 +777,11 @@ GraphQL defines five built-in directives:
 
 | Directive      | Locations                                                                         | Purpose                                           |
 | -------------- | --------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `@skip`        | `FIELD`, `FRAGMENT_SPREAD`, `INLINE_FRAGMENT`                                     | Skip a selection when `if` is `true`              |
-| `@include`     | `FIELD`, `FRAGMENT_SPREAD`, `INLINE_FRAGMENT`                                     | Include a selection only when `if` is `true`      |
-| `@deprecated`  | `FIELD_DEFINITION`, `ARGUMENT_DEFINITION`, `INPUT_FIELD_DEFINITION`, `ENUM_VALUE` | Mark a schema element as deprecated               |
-| `@specifiedBy` | `SCALAR`                                                                          | Associate a scalar with an external specification |
-| `@oneOf`       | `INPUT_OBJECT`                                                                    | Require exactly one input field to be supplied    |
+| **`@skip`**    | `FIELD`, `FRAGMENT_SPREAD`, `INLINE_FRAGMENT`                                     | Skip a selection when `if` is `true`              |
+| **`@include`** | `FIELD`, `FRAGMENT_SPREAD`, `INLINE_FRAGMENT`                                     | Include a selection only when `if` is `true`      |
+| **`@deprecated`** | `FIELD_DEFINITION`, `ARGUMENT_DEFINITION`, `INPUT_FIELD_DEFINITION`, `ENUM_VALUE` | Mark a schema element as deprecated               |
+| **`@specifiedBy`** | `SCALAR`                                                                          | Associate a scalar with an external specification |
+| **`@oneOf`**   | `INPUT_OBJECT`                                                                    | Require exactly one input field to be supplied    |
 
 Their definitions and behavior are standardized by GraphQL. ([spec.graphql.org](https://spec.graphql.org/September2025/))
 
@@ -794,11 +796,19 @@ input PostTarget @oneOf {
 
 `@oneOf` applies to the input object itself. Exactly one of its fields must be supplied.
 
+A scalar extension can attach `@specifiedBy` to an existing scalar:
+
+```graphql
+scalar DateTime
+
+extend scalar DateTime @specifiedBy(url: "https://scalars.graphql.org/andimarek/date-time.html")
+```
+
 ### 8. Schema Definitions
 
 #### 8.1 Schema Definition
 
-A schema can explicitly define its root operation mappings:
+A **schema definition** maps operation types to their root object types:
 
 ```graphql
 schema {
@@ -860,7 +870,7 @@ Names are used for types, fields, arguments, directives, enum values, and other 
 
 #### 9.2 Descriptions
 
-Descriptions are part of the GraphQL type system and can be attached to schema elements using string literals:
+**Descriptions** are part of the GraphQL type system and can be attached to schema elements using string literals:
 
 ```graphql
 """A user of the platform."""
@@ -872,7 +882,7 @@ type User {
 
 Descriptions can be provided for types, fields, arguments, input fields, enum values, and directives.
 
-They are exposed through introspection and do not affect execution behavior.
+**Introspection** lets GraphQL queries inspect schema metadata, including descriptions. Descriptions do not affect execution behavior.
 
 #### 9.3 Comments
 
@@ -1049,26 +1059,12 @@ The internal representation is not standardized.
 | ---------------------- | ------------------------------ |
 | GraphQL Schema Model   | Internal schema representation |
 | SDL representation     | Schema construction API        |
-| GQL against the schema | Resolver implementation        |
+| GraphQL documents against the schema | Resolver implementation        |
 | Schema semantics       | Server architecture            |
 
-**Core idea:** SDL defines the GraphQL schema; the implementation decides how that schema is constructed and represented.
+Core idea: SDL defines the GraphQL schema; the implementation decides how that schema is constructed and represented.
 
-Yes. There was substantial repetition in the draft, particularly around schema-defined validity, fragments, and variables. I also had several sections that restated distinctions already established rather than adding reference value.
-
-The biggest reductions are:
-
-* Remove repeated explanations of fields being schema-defined.
-* Collapse basic selection-set material.
-* Treat literal values as a compact syntax reference rather than re-explaining their typing.
-* Combine variable rules instead of separately restating compatibility/default behavior.
-* Reduce fragment sections to the distinctions that matter: named vs. inline, type conditions, composition/cycles.
-* Remove the final "GraphQL and the Schema" section because it largely repeats Chapter 2.
-* Remove the final mental-model section's repetition of the chapter; retain only a compact summary.
-
-The resulting chapter should be closer to this:
-
-## Chapter 3 — GraphQL Query Language
+## Chapter 3 — GraphQL Documents
 
 ### 1. Documents and Operations
 
@@ -1118,7 +1114,7 @@ A document containing multiple operations requires the request to identify the o
 
 #### 2.1 Fields and Nested Selections
 
-A selection set contains fields, with nested selection sets for object-valued fields:
+A **root selection set** contains an operation's top-level selections. Object-valued fields have nested selection sets:
 
 ```graphql
 query {
@@ -1200,7 +1196,7 @@ A variable can only be used where its declared type is compatible with the argum
 
 #### 4.1 Aliases
 
-An alias changes a field's response name without changing the field selected:
+A field's **response name** is its key in the returned data. An alias changes that name without changing the field selected:
 
 ```graphql
 {
@@ -1247,7 +1243,7 @@ Aliases can give them different response names.
 
 #### 5.1 Named Fragments
 
-A named fragment defines a reusable selection set:
+A named fragment defines a reusable selection set. Its **type condition**, written `on Type`, restricts the selections to values compatible with that type:
 
 ```graphql
 fragment UserFields on User {
@@ -1277,8 +1273,6 @@ search {
 ```
 
 #### 5.3 Type Conditions
-
-`on Type` is a type condition. The fragment's selections apply when the current value is compatible with that type.
 
 Object, interface, and union types can be used as type conditions.
 
@@ -1327,7 +1321,7 @@ GraphQL names begin with `_` or an ASCII letter and may then contain `_`, letter
 
 Whitespace and line breaks do not determine structure. Commas are optional and insignificant. Comments begin with `#` and run to the end of the line.
 
-### 8. GQL and the Schema
+### 8. Documents and the Schema
 
 #### 8.1 Schema-Defined Validity
 
@@ -1348,7 +1342,7 @@ flowchart LR
 
 ### 9. Chapter Summary
 
-GraphQL query language is a declarative language for selecting data from a schema.
+GraphQL is a declarative language for selecting data from a schema.
 
 | Construct      | Purpose                               |
 | -------------- | ------------------------------------- |
@@ -1361,13 +1355,13 @@ GraphQL query language is a declarative language for selecting data from a schem
 | Type condition | Restricts fragment selections by type |
 | Directive      | Modifies an executable construct      |
 
-The document describes **what is requested**; execution determines **what that request does**.
+The document describes what is requested; execution determines what that request does.
 
 ## Chapter 4 — GraphQL Execution
 
 Execution prepares variables, collects fields, obtains their values, and completes those values into a result.
 
-The implementation examples use GraphQL.js v16. GraphQL Tools supplies the resolver-map and schema-transformation APIs used with it.
+GraphQL.js is a JavaScript implementation of GraphQL; the examples use v16. GraphQL Tools is a collection of libraries for constructing and transforming schemas.
 
 ### 1. Preparing Runtime Variables
 
@@ -1379,9 +1373,9 @@ An unknown operation name, or an omitted name when several operations exist, pre
 
 #### 1.2 Input Coercion
 
-Input coercion accepts, rejects, or converts values according to their declared input types.
+**Input coercion** accepts, rejects, or converts values according to their declared input types.
 
-Variable coercion happens before any field executes. A valid document can still fail because its supplied variables are invalid.
+Variable coercion applies these rules to supplied variables before any field executes. A valid document can still fail because its supplied variables are invalid.
 
 #### 1.3 Built-in Scalar Inputs
 
@@ -1402,7 +1396,7 @@ Variable coercion happens before any field executes. A valid document can still 
 | List | Coerce each item. Wrap a non-list, non-null value as one item. |
 | Input object | Coerce declared fields recursively; reject unknown fields. |
 | Enum | Require an exact, case-sensitive member name. |
-| OneOf input object | Require exactly one supplied field with a non-null, valid value. |
+| **OneOf input object** (`@oneOf`) | Require exactly one supplied field with a non-null, valid value. |
 | Custom scalar | Apply the scalar's own input contract. |
 
 Singleton list coercion applies recursively:
@@ -1455,7 +1449,7 @@ Singleton coercion applies to values, not variable declarations. A variable decl
 
 #### 2.1 Collection for the Current Object
 
-Field collection determines which selections apply to the current object. Execution starts with the operation's root selection set, then collects child selections as field values become available.
+**Field collection** determines which selections apply to the current object. Execution starts with the operation's root selection set, then collects child selections as field values become available.
 
 Collection follows applicable fragments and evaluates `@skip` and `@include` using the prepared variables.
 
@@ -1484,7 +1478,7 @@ Directives are structured annotations. Their definitions specify where they are 
 
 There is no universal stage where all directives run. Declaring a custom directive does not implement its behavior.
 
-Custom collection hooks are framework-specific. GraphQL Ruby, for example, provides a directive `include?` hook. Extension code remains responsible for preserving GraphQL's required behavior. [Directive runtime hooks](https://graphql-ruby.org/type_definitions/directives#runtime-hooks)
+Custom collection hooks are framework-specific. GraphQL Ruby, a Ruby implementation of GraphQL, provides a directive `include?` hook. Extension code remains responsible for preserving GraphQL's required behavior. [Directive runtime hooks](https://graphql-ruby.org/type_definitions/directives#runtime-hooks)
 
 #### 2.3 Grouping by Response Name
 
@@ -1526,7 +1520,7 @@ first: user(filter: { id: "8" }) { name }
 
 Both arguments can satisfy the same input type while differing as expressions. Replacing the second field with `first: topic(...)` would also conflict.
 
-Fragments on distinct concrete object types can use different fields or arguments under one response name. Their response shapes must still be compatible, including leaf types and list/non-null wrappers. [Field-merging validation](https://spec.graphql.org/September2025/#sec-Field-Selection-Merging)
+Fragments on distinct object types can use different fields or arguments under one response name. Their response shapes must still be compatible, including leaf types and list/non-null wrappers. [Field-merging validation](https://spec.graphql.org/September2025/#sec-Field-Selection-Merging)
 
 ### 3. Resolving Fields
 
@@ -1544,13 +1538,13 @@ const resolvers = {
 };
 ```
 
-The structure is **type name → field name → resolver**. This example implements the schema field `Query.greeting`.
+The structure is type name → field name → resolver. This example implements the schema field `Query.greeting`.
 
 This resolver-map structure is a GraphQL Tools API, not part of core GraphQL.
 
 #### 3.2 Registering Resolvers
 
-Registration combines schema declarations with their implementations before requests execute. `makeExecutableSchema` builds an executable schema from an SDL string, `typeDefs`, and a resolver map:
+An executable schema combines type declarations with the callbacks used during execution. GraphQL Tools' `makeExecutableSchema` constructs one from an SDL string, `typeDefs`, and a resolver map. GraphQL.js's `graphql()` runs a document against it:
 
 ```javascript
 import { makeExecutableSchema } from "@graphql-tools/schema";
@@ -1574,7 +1568,7 @@ const result = await graphql({ schema, source: "{ welcome: greeting }" });
 
 `makeExecutableSchema` parses the SDL string; a parsed SDL document is also accepted.
 
-The resulting schema is a GraphQL.js `GraphQLSchema` containing the registered callbacks. `graphql()` executes the document supplied as `source` against that schema:
+The result is a `GraphQLSchema`, GraphQL.js's schema object. The document supplied as `source` produces:
 
 ```json
 { "data": { "welcome": "Hello" } }
@@ -1613,7 +1607,7 @@ The execution options include:
 | `source` / `document` | Document text for `graphql()` / parsed document for `execute()` |
 | `operationName` | Select an operation |
 | `variableValues` | Supply variables |
-| `rootValue` | Supply the initial parent value |
+| `rootValue` | Supply the value passed to top-level field resolvers |
 | `contextValue` | Supply shared application data |
 
 Subscription streams use the separate `subscribe()` entry point in Section 8.
@@ -1634,15 +1628,15 @@ Other schema types use different entries:
 | Type kind | Entry |
 | --- | --- |
 | Object | Field resolvers; optional `__isTypeOf` to recognize values of the type |
-| Interface or union | `__resolveType` to identify a value's concrete object type |
-| Scalar | Scalar implementation for input and output coercion |
+| Interface or union | `__resolveType` to identify which object type a value represents |
+| Scalar | Callbacks converting inputs to internal values and results to response values |
 | Enum | Member names mapped to internal values |
 
 Type callbacks sit directly beneath the type name. They are not field callbacks. Input objects have no field resolvers.
 
 Root operation types are ordinary object types assigned to the query, mutation, and subscription roles. With `schema { query: ReadRoot }`, the map uses `ReadRoot`, not `Query`. Capitalization is a naming convention.
 
-Ordinary keys must match schema types and fields. The map need not repeat every type or field; omitted field resolvers use default resolution.
+Ordinary keys must match schema types and fields. The map need not repeat every type or field. GraphQL.js uses default field resolution as a fallback for fields without a registered resolver; Section 3.8 covers its behavior.
 
 GraphQL Tools reserves specific `__` keys for type configuration. The prefix does not make arbitrary names valid callbacks. [Resolver-map API](https://the-guild.dev/graphql/tools/docs/resolvers)
 
@@ -1713,7 +1707,7 @@ The caller supplies `rootValue` as an execution option. It is runtime data, sepa
 
 #### 3.8 Default Field Resolution
 
-Without an explicit resolver, GraphQL.js reads the parent property matching the schema field name.
+Without an explicit resolver, GraphQL.js's `defaultFieldResolver` reads the parent property matching the schema field name.
 
 If `Query.user` returns `{ id: "7", name: "Alice" }`, default resolution supplies `User.id` and `User.name`. An alias such as `displayName: name` still reads `parent.name`.
 
@@ -1785,7 +1779,7 @@ GraphQL.js supplies `info` to describe the current field execution:
 
 #### 3.13 Response Paths
 
-A response path identifies a position inside `data`, using response names and zero-based list indices.
+A **response path** identifies a position inside `data`, using response names and zero-based list indices.
 
 For a list-valued `friends` field in `{ viewer: user { friends { name } } }`, the first friend's name has path:
 
@@ -1799,7 +1793,7 @@ GraphQL.js represents `info.path` as linked segments with `key` and `prev`. Foll
 
 `info.returnType` is a schema type instance, not a type inferred from the resolver's result.
 
-For `[User!]!`, the instances nest as follows:
+`GraphQLObjectType` represents an object type. `GraphQLNonNull` and `GraphQLList` wrap another type through their `ofType` property. For `[User!]!`, the instances nest as follows:
 
 ```mermaid
 flowchart LR
@@ -1838,7 +1832,7 @@ For this directive:
 directive @uppercase(enabled: Boolean! = true) on FIELD
 ```
 
-For a query selection such as `greeting @uppercase`, choose one contributing node as `fieldNode`. GraphQL.js prepares the directive's arguments with:
+For a query selection such as `greeting @uppercase`, choose one contributing node as `fieldNode`. GraphQL.js's `getDirectiveValues` prepares the directive's arguments:
 
 ```javascript
 import { getDirectiveValues } from "graphql";
@@ -1883,7 +1877,9 @@ type Query {
 }
 ```
 
-Build `schema` from this SDL and the `Query.greeting` resolver. Then use the `withUppercase` wrapper from Section 3.15 to transform its annotated fields:
+Build `schema` from this SDL and the `Query.greeting` resolver. GraphQL Tools' `mapSchema` transforms its constructed configurations and returns a new schema; `MapperKind.OBJECT_FIELD` selects object fields. `getDirective` reads their retained annotations.
+
+Apply the `withUppercase` wrapper from Section 3.15 to annotated fields:
 
 ```javascript
 import { defaultFieldResolver } from "graphql";
@@ -1901,8 +1897,6 @@ const executableSchema = mapSchema(schema, {
   },
 });
 ```
-
-`mapSchema` transforms constructed field configurations and returns a new schema. It does not directly edit the SDL syntax tree. `getDirective` reads the retained annotation.
 
 Execute requests against `executableSchema`. The annotation is read during setup; the wrapper runs during field execution. [Schema directive implementation](https://the-guild.dev/graphql/tools/docs/schema-directives#implementing-schema-directives)
 
@@ -1926,7 +1920,7 @@ The engine can use native internal values. There is no required intermediate for
 
 #### 4.2 Scalar Results
 
-Input and output coercion have different acceptance rules. GraphQL.js v16 accepts these output conversions:
+**Result coercion**, also called output coercion, converts internal scalar and enum values to response values. Its acceptance rules differ from input coercion. GraphQL.js v16 accepts these scalar conversions:
 
 | Declared output | Resolver result | Completed value |
 | --- | --- | --- |
@@ -1940,7 +1934,7 @@ GraphQL defines the result's constraints. Implementations choose conversions fro
 
 #### 4.3 Custom Scalar Results
 
-A custom scalar supplies its own result coercion through `serialize`:
+`GraphQLScalarType` defines a custom scalar in GraphQL.js. Its `serialize` callback supplies result coercion:
 
 ```javascript
 import { GraphQLScalarType } from "graphql";
@@ -2034,7 +2028,7 @@ If the parent result is null, its child fields do not execute.
 
 #### 4.7 Resolving Interfaces and Unions
 
-An interface or union result needs a concrete object type before fragment conditions and child fields can execute.
+A concrete type is the actual object type represented by a value. An interface or union result needs this type identified before fragment conditions and child fields can execute.
 
 For this schema:
 
@@ -2283,7 +2277,7 @@ const resolvers = {
 
 For `{ users { manager { name } } }`, 100 users can cause 101 database requests: one for the list and one per manager.
 
-This is the **N+1 problem**. Field collection does not combine lookups across list items, even when several users share a manager.
+This is the N+1 problem. Field collection does not combine lookups across list items, even when several users share a manager.
 
 Batching combines several lookups into one backend request. Caching reuses a lookup result. Both are general optimization patterns supplied by application code or libraries.
 
@@ -2397,7 +2391,7 @@ A subscription does not automatically watch a database or send an initial snapsh
 
 #### 8.2 The Source Event Stream
 
-A source event stream supplies the application payloads that drive a subscription. GraphQL.js represents it as an async iterable: a JavaScript value whose items can be consumed over time.
+A **source event stream** supplies the application payloads that drive a subscription. GraphQL.js represents it as an async iterable: a JavaScript value whose items can be consumed over time.
 
 For `userUpdated: User`, register the source through the field's `subscribe` callback:
 
@@ -2446,7 +2440,7 @@ Normal resolution and completion produce:
 { "data": { "userUpdated": { "name": "Alice" } } }
 ```
 
-These resolvers can be asynchronous. Their results form the subscription's response stream.
+These resolvers can be asynchronous. Their results form the subscription's **response stream**.
 
 If events contain `{ userUpdated: { name: "Alice" } }`, default field resolution can read `event.userUpdated`; the explicit `resolve` callback is unnecessary.
 
@@ -2514,7 +2508,7 @@ Normal iterator completion returns `done: true`.
 
 Calling the result iterator's `.return()` forwards cancellation to the source's `.return()` when present. The source performs resource cleanup.
 
-Cancellation does not automatically stop resolver I/O already in progress. Delivering completion and failures over the network requires a transport adapter.
+Cancellation does not automatically stop resolver I/O already in progress. Transport code delivers completion and failures over the network.
 
 ### 9. Connecting Execution to the Client
 
@@ -2630,7 +2624,7 @@ GraphQL.js v16 does not impose these application limits automatically. Depth alo
 
 GraphQL over Server-Sent Events (SSE) is one subscription transport protocol. The `graphql-sse` library implements it.
 
-Its **distinct connections mode** associates one operation with each HTTP response stream:
+Its distinct connections mode associates one operation with each HTTP response stream:
 
 ```http
 POST /graphql HTTP/1.1
@@ -2661,7 +2655,7 @@ Blank lines delimit events. `next` carries a result; `complete` signals normal c
 
 #### 9.8 Transport Protocol Choices
 
-Core GraphQL defines response-stream semantics, not universal wire messages. Each transport protocol defines its own exchange:
+Core GraphQL defines response-stream semantics, not universal wire messages. `graphql-transport-ws` is a GraphQL-over-WebSocket protocol. Its exchange differs from GraphQL over SSE:
 
 | Action | SSE distinct mode | `graphql-transport-ws` over WebSocket |
 | --- | --- | --- |
@@ -2670,7 +2664,7 @@ Core GraphQL defines response-stream semantics, not universal wire messages. Eac
 | Normal completion | `complete` event | `complete` message |
 | Client cancellation | Cancel HTTP response stream | `complete` message |
 
-The WebSocket protocol uses operation IDs to multiplex operations. SSE distinct mode uses the response stream to identify the operation; SSE's single connection mode adds multiplexing.
+The WebSocket protocol uses operation IDs to multiplex operations. SSE distinct mode uses the response stream to identify the operation; SSE's single connection mode multiplexes operations on one response stream.
 
 An HTTP response stream is not necessarily a separate network connection. [WebSocket protocol](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md)
 
