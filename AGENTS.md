@@ -8,11 +8,17 @@ The series format is:
 
 These are compact technical learning notes designed to build a precise mental model quickly and serve as a reference that can be shared with others.
 
+## Applying This Standard
+
+You must follow these instructions as requirements for the work. Read them in full before starting, and interpret each instruction in the context of the guide’s purpose and the other instructions. Use existing material to understand how the standard applies in practice.
+
+Before delivering work, review it against the applicable instructions and correct any deviations. Following the standard is your responsibility; do not rely on the user to identify where you failed to apply it.
+
 ## Writing Style
 
 Write for clarity, precision, and information density.
 
-Use plain, simplified technical English. Prefer the shortest set of statements needed to communicate the necessary information accurately.
+Use plain, simplified technical English. Use the shortest set of statements needed to communicate the necessary information accurately.
 
 Do not add filler, rhetorical flourishes, motivational language, jokes, or stylistic embellishment.
 
@@ -23,7 +29,7 @@ Do not sacrifice important information for brevity. The goal is **minimum necess
 ### Sentences
 
 * Use short, direct sentences. Keep related clauses together when they express a relationship more clearly than separate sentences.
-* Prefer direct verbs and familiar technical language. Remove wording that adds length without adding meaning.
+* Use direct verbs and familiar technical language. Remove wording that adds length without adding meaning.
 * Make clear what each statement refers to. Repeat a name when needed to avoid ambiguity.
 
 ### Passages
@@ -42,7 +48,7 @@ Establish what each new concept is and what role it serves before relying on it 
 
 Do not introduce several independent concepts in one section when they can be taught separately.
 
-Prefer concrete examples over abstract explanations when an example makes the concept easier to understand.
+Use concrete examples when they make a concept easier to understand than an abstract explanation alone.
 
 Teach the smallest useful concept first, then build on it.
 
@@ -54,7 +60,7 @@ When a distinction is important, make the distinction explicit rather than relyi
 
 Before drafting a guide, outline its chapters to establish the overall learning progression. Before drafting each chapter, outline its sections and any needed subsections to work out how that part of the progression will be taught.
 
-Use these outlines to resolve ordering, prerequisites, and conceptual boundaries before writing the content in full. Together, they should tell a coherent learning story in which each part builds toward the intended mental model.
+Use these outlines to resolve ordering, prerequisites, and conceptual boundaries before writing the content in full. Together, they must establish a coherent learning progression in which each part builds toward the intended mental model.
 
 ### Guide and Chapter Structure
 
@@ -74,7 +80,7 @@ Use section boundaries to distinguish meaningful learning steps. Use subsections
 
 Do not target a particular number or size of chapters, sections, or subsections. Do not force parallel topics into matching structures.
 
-Each section should have a clear purpose:
+Each section must have a clear purpose:
 
 * Introduce a concept
 * Explain an important rule
@@ -83,7 +89,7 @@ Each section should have a clear purpose:
 * Compare related concepts
 * Summarize a useful mental model
 
-Headings should identify the actual teaching purpose. When revisiting a familiar concept, make its new role clear rather than presenting its definition again.
+Use headings that identify the actual teaching purpose. When revisiting a familiar concept, make its new role clear rather than presenting its definition again.
 
 ### Outline Review and Approval
 
@@ -117,7 +123,7 @@ Continue this hierarchy throughout the document.
 
 Do not introduce another `#` heading after the book title.
 
-Chapter numbers and section numbers should remain sequential within the document.
+Keep chapter numbers and section numbers sequential within the document.
 
 Future chapters must be appendable directly after earlier chapters without changing the heading hierarchy.
 
@@ -143,7 +149,7 @@ Do not put ordinary prose or simple lists inside code blocks.
 
 ## Examples
 
-Prefer the smallest example that establishes the concept.
+Use the smallest example that establishes the concept.
 
 Show only the parts relevant to the lesson.
 
@@ -169,7 +175,7 @@ Follow the table with explanation only when the table cannot fully communicate t
 
 Separate concepts that are commonly conflated.
 
-When useful, distinguish:
+Make these distinctions explicit when they affect the explanation:
 
 * Specification vs. implementation
 * Abstract model vs. concrete representation
@@ -227,7 +233,7 @@ When accuracy depends on a distinction that is easy to get wrong, prioritize pre
 
 End chapters with a concise summary only when it provides a useful reference or mental model.
 
-A summary should synthesize the chapter rather than repeat it.
+A summary must synthesize the chapter rather than repeat it.
 
 Use a table, diagram, or a few compact statements when those communicate the summary more efficiently than prose.
 
@@ -237,7 +243,7 @@ Use feedback to improve the explanation and its progression. The revised text mu
 
 When a claim changes, replace the old explanation. Do not append a qualification that requires the reader to reconcile both versions.
 
-Before delivery, review the writing against this standard as well as checking accuracy and coverage. Revise organization as needed; sentence edits alone cannot fix a structural problem.
+Check accuracy and coverage. Revise organization as needed; sentence edits alone cannot fix a structural problem.
 
 ## Overall Standard
 
