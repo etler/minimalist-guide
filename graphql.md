@@ -1365,58 +1365,99 @@ The document describes **what is requested**; execution determines **what that r
 
 ## Chapter 4 — GraphQL Execution
 
-Chapter scope: follow an operation from server input through field execution to client delivery. A **transport adapter** is the server framework or application code that connects network requests and responses to the engine's in-process API. Sections 1–8 establish execution behavior; Section 9 connects those mechanisms into a complete server/client exchange, including failures and cancellation.
+Execution prepares variables, collects fields, obtains their values, and completes those values into a result.
+
+The implementation examples use GraphQL.js v16. GraphQL Tools supplies the resolver-map and schema-transformation APIs used with it.
 
 ### 1. Preparing Runtime Variables
 
-Execution first selects one operation from the validated document, using the request's operation name when supplied. An unknown name, or an omitted name when several operations exist, produces a request error before variable coercion or field execution. Only the selected operation executes. [Operation selection](https://spec.graphql.org/September2025/#sec-Executing-Requests)
+#### 1.1 Selecting the Operation
 
-#### 1.1 Coercing Runtime Variable Values
+The engine selects one operation from the validated document before preparing its variables.
 
-Before executing any fields, the engine coerces supplied variable values according to their declared input types. A failure prevents the operation from executing, even when the document is valid.
+An unknown operation name, or an omitted name when several operations exist, prevents execution. Only the selected operation executes.
 
-GraphQL's **input coercion** includes acceptance and rejection as well as conversion. The specification organizes the rules by input type, with a separate algorithm for processing variable declarations.
+#### 1.2 Input Coercion
+
+Input coercion checks and converts supplied values according to their declared input types.
+
+GraphQL uses **coercion** to include acceptance and rejection as well as conversion. The rules are organized by input type; a separate algorithm processes variable declarations.
+
+Variable coercion happens before any field executes. A valid document can still fail because its supplied variables are invalid.
+
+#### 1.3 Built-in Scalar Inputs
 
 | Input type | Accepted non-null runtime values |
 | --- | --- |
 | `Int` | Integers from −2³¹ through 2³¹ − 1 |
 | `Float` | Finite numbers representable as double-precision values, including integers |
-| `String` | Strings only |
-| `Boolean` | Booleans only |
+| `String` | Strings |
+| `Boolean` | Booleans |
 | `ID` | Strings or integers, interpreted according to the service's ID format |
 
-Built-in input coercion does not generally parse numeric strings, apply truthiness, or stringify arbitrary values. For example, `"2"` is invalid for `Int`, while `2` is valid. [GraphQL.js scalar implementations](https://github.com/graphql/graphql-js/blob/16.x.x/src/type/scalars.ts)
+`"2"` is invalid for `Int`; `2` is valid. `String` does not stringify arbitrary inputs, and `Boolean` does not apply truthiness.
 
-For other input types:
+#### 1.4 Other Input Types
 
-* **Lists:** coerce each item. A non-list, non-null value is treated as one item: `2` becomes `[2]` for `[Int]`, or `[[2]]` for `[[Int]]`. Empty lists are valid even for `[Int!]!`; item nullability is checked separately.
-* **Input objects:** check supplied fields against their declared types recursively. Unknown fields are rejected. Nested defaults do not, by themselves, create an omitted or null parent object.
-* **Enums:** require an exact, case-sensitive member name. JSON variables use strings; GraphQL literals use unquoted enum names. Formats with distinct symbolic values can represent enum names that way.
-* **OneOf input objects:** an input type marked `@oneOf` requires exactly one supplied field with a non-null, valid value. Other fields must be absent, not explicitly null. [Recursive input coercion implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/utilities/coerceInputValue.ts)
-* **Custom scalars:** follow their own input contract; the scalar's name alone does not specify accepted values. [Custom scalar contracts](https://www.graphql-js.org/docs/custom-scalars/)
+| Input type | Coercion |
+| --- | --- |
+| List | Coerce each item. Wrap a non-list, non-null value as one item. |
+| Input object | Coerce declared fields recursively; reject unknown fields. |
+| Enum | Require an exact, case-sensitive member name. |
+| OneOf input object | Require exactly one supplied field with a non-null, valid value. |
+| Custom scalar | Apply the scalar's own input contract. |
 
-**Representation boundary.** Core GraphQL does not require JSON or a canonical intermediate representation. An engine can use native values, but must preserve distinctions needed by the coercion rules, such as strings versus numbers and absent versus null. Decoding cannot arbitrarily turn a JSON string into a number to bypass those rules. Formats without separate integer and float representations, such as JSON, treat a number with no fractional part as an integer: JSON `5.0` can satisfy `Int`; the GraphQL literal `5.0` cannot. [Specification: scalar input coercion](https://spec.graphql.org/September2025/#sec-Scalars.Input-Coercion)
+Singleton list coercion applies recursively:
 
-**Validation boundary.** Input object literals in the document are checked recursively during document validation: field names, uniqueness, required fields, and value types. Runtime variable values are checked during variable coercion. Validation also checks variable type compatibility: a variable declared as `Int` cannot be used where `[Int]` is expected, despite singleton coercion for values supplied to a variable declared as `[Int]`.
+| Declared type | Supplied value | Coerced value |
+| --- | --- | --- |
+| `[Int]` | `2` | `[2]` |
+| `[[Int]]` | `2` | `[[2]]` |
 
-#### 1.2 Omitted Variables, Explicit Null, and Defaults
+An empty list is valid even for `[Int!]!`.
+
+For a OneOf input object, all fields except the supplied field must be absent. Explicit null does not count as absence.
+
+#### 1.5 Absence, Null, and Defaults
 
 | Supplied variable value | Result |
 | --- | --- |
 | Omitted, with a variable default | Use the default |
 | Omitted, without a default | Remain absent if nullable; otherwise fail |
 | Explicit `null` | Accept if nullable; otherwise fail |
-| Other value | Apply the declared type's input coercion rules |
+| Other value | Apply input coercion |
 
-Defaults replace absence, not null or invalid values. A non-null variable with a default can therefore be omitted, but cannot be explicitly null.
+Defaults replace absence, not null or invalid values. A non-null variable with a default can be omitted but cannot be explicitly null.
 
-Input object fields follow the same omission rules using their schema defaults. An absent field stays absent unless defaulted; it does not automatically become null. Extra entries in the top-level variables map are ignored by the variable-coercion algorithm, unlike unknown fields inside input objects. [Variable processing implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/values.ts)
+Input object fields follow the same rules using their schema defaults. Defaults on nested fields do not create an omitted or null parent object.
 
-### 2. Collecting Fields for the Current Object
+Extra entries in the top-level variables map are ignored. Unknown fields inside an input object are rejected.
 
-#### 2.1 Filtering Selections Before Resolution
+#### 1.6 Input Representation
 
-For the current object, field collection follows applicable fragments and evaluates `@skip` and `@include` using the prepared variables. With both directives present, a selection survives only when `skip` is false and `include` is true.
+Core GraphQL requires neither JSON nor a canonical intermediate format. The engine's input representation must preserve distinctions needed by coercion, including strings versus numbers and absence versus null.
+
+JSON has one number representation. JSON `5.0` can satisfy `Int` because it has no fractional part; the GraphQL literal `5.0` is a float literal and cannot.
+
+Enum inputs use strings in JSON and unquoted names in GraphQL literals. Other formats can use distinct symbolic values. [Input coercion](https://spec.graphql.org/September2025/#sec-Scalars.Input-Coercion)
+
+#### 1.7 Validation vs. Variable Coercion
+
+| Input | Checked when |
+| --- | --- |
+| Literal written in the document | Document validation |
+| Declared variable type at its usage location | Document validation |
+| Value supplied for a variable | Variable coercion |
+
+Validation checks input object literals recursively, including field names, uniqueness, required fields, and value types.
+
+Singleton coercion applies to values, not variable declarations. A variable declared as `Int` cannot be used where `[Int]` is expected. A variable declared as `[Int]` can receive the runtime value `2`.
+
+### 2. Collecting Fields
+
+#### 2.1 Collection for the Current Object
+
+Field collection determines which selections apply to the current object. It follows applicable fragments and evaluates `@skip` and `@include` using the prepared variables.
 
 ```graphql
 query GetUser($showName: Boolean!) {
@@ -1427,19 +1468,29 @@ query GetUser($showName: Boolean!) {
 }
 ```
 
-With `showName: false`, the engine collects `user` first. If it produces an object, collection for that object retains only `id`. The `name` resolver is not called, and `name` is absent from the response rather than null.
+With `showName: false`, execution of the user includes only `id`. The `name` resolver is not called, and `name` is absent from the response.
 
-Collection repeats as execution reaches nested objects; it is not one pass that resolves the entire document upfront.
+With both directives present, a selection survives only when `skip` is false and `include` is true.
 
-**Directive processing.** `@skip` and `@include` have behavior explicitly defined by the field-collection algorithm. There is no universal stage where all directives run. A directive is a structured annotation; its allowed location does not establish when it is processed. For example, `@deprecated` supplies schema metadata, while `@oneOf` constrains input objects.
+Collection repeats when execution reaches each nested object.
 
-Declaring a custom directive does not implement its behavior. The engine or other tooling must interpret it at the relevant stage. Returning null from a resolver does not reproduce omission during collection. [GraphQL.js directive behavior](https://www.graphql-js.org/docs/using-directives/)
+#### 2.2 Directive Processing Stages
 
-Collection hooks are framework-specific. For example, GraphQL Ruby provides a directive `include?` hook. Such hooks can support custom filtering, but extension code must still preserve required GraphQL behavior; the existence of a hook does not establish conformance. [GraphQL Ruby runtime hooks](https://graphql-ruby.org/type_definitions/directives#runtime-hooks)
+Directives are structured annotations. Their definitions specify where they are allowed; the engine or other tooling supplies their behavior.
 
-#### 2.2 Grouping Selections by Response Name
+| Directive | Processing role |
+| --- | --- |
+| `@skip`, `@include` | Filter selections during collection |
+| `@oneOf` | Constrain input objects |
+| `@deprecated` | Supply schema metadata |
 
-Surviving selections are grouped by **response name**: the alias when present, otherwise the field name. Each group is executed once for the current object, combining its child selections.
+There is no universal stage where all directives run. Declaring a custom directive does not implement its behavior.
+
+Custom collection hooks are framework-specific. GraphQL Ruby, for example, provides a directive `include?` hook. Extension code remains responsible for preserving GraphQL's required behavior. [Directive runtime hooks](https://graphql-ruby.org/type_definitions/directives#runtime-hooks)
+
+#### 2.3 Grouping by Response Name
+
+Surviving selections are grouped by response name. Each group executes once for the current object, with its child selections combined:
 
 ```graphql
 {
@@ -1449,79 +1500,87 @@ Surviving selections are grouped by **response name**: the alias when present, o
 }
 ```
 
-| Response name | Execution |
+| Group | Execution |
 | --- | --- |
-| `first` | Resolve `user(id: "7")` once, then execute the combined `id` and `name` selections |
+| `first` | Resolve `user(id: "7")` once, then execute `id` and `name` |
 | `second` | Resolve `user(id: "7")` separately, then execute `name` |
 
-Grouping is local to the current object execution. It is not request-wide caching or deduplication by field arguments. [Specification: field collection](https://spec.graphql.org/September2025/#sec-Field-Collection)
+Grouping applies to one object execution. It does not cache results across response positions.
 
-**Why each group is unambiguous.** Document validation has already checked that overlapping selections with the same response name can merge:
+#### 2.4 Why Groups Are Unambiguous
 
-* Their field names and argument expressions must match.
-* Input object arguments are compared recursively; matching their declared input type is insufficient. `{ id: "7" }` and `{ id: "8" }` can both satisfy an input type while conflicting for merging.
-* Argument order and input object field order do not matter; list item order does.
-* `$a` and `$b` are different expressions even if their supplied values happen to match.
-* Combined child selections must also be free of conflicts recursively.
+Document validation rejects conflicting selections before collection begins.
 
-Thus `first: user(id: "7")` conflicts with either `first: user(id: "8")` or `first: topic(id: "news")`. Different aliases allow separate executions. These conflicts are rejected during validation, before field collection.
+For selections that can apply to the same object:
 
-Fragments on distinct concrete object types may use different fields or arguments under the same response name because they cannot apply to the same object. Their response shapes must still be compatible, including matching leaf types and list/non-null wrappers. [Field-merging validation implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/validation/rules/OverlappingFieldsCanBeMergedRule.ts)
+* Field names and argument expressions must match.
+* Input object arguments are compared recursively.
+* Argument order and input object field order do not matter; list order does.
+* Different variable names are different expressions, even if their runtime values match.
+* Combined child selections must also be free of conflicts.
 
-### 3. Resolving a Collected Field
+These selections conflict:
 
-The implementation examples use GraphQL.js v16, with GraphQL Tools conventions for resolver maps and schema transformations.
-
-#### 3.1 Resolver Maps: Structure and Vocabulary
-
-A **field resolver** is a function that supplies the value of one field on one schema object type. It can read, fetch, or compute that value. The execution engine calls it when executing a collected selection and uses its result to continue traversal.
-
-An explicitly registered GraphQL.js field resolver receives four positional parameters:
-
-```javascript
-resolve(parent, args, context, info)
+```graphql
+first: user(filter: { id: "7" }) { name }
+first: user(filter: { id: "8" }) { name }
 ```
 
-| Parameter | Contents |
-| --- | --- |
-| `parent` | Current object's internal value; the supplied root value for a root field |
-| `args` | Prepared arguments for this field |
-| `context` | Application-supplied data shared across the execution |
-| `info` | Engine-provided metadata about this field execution |
+Both arguments can satisfy the same input type while differing as expressions. Replacing the second field with `first: topic(...)` would also conflict.
 
-These parameter names are conventions; their positions define the API. A function can omit parameters it does not use. The following sections explain the values and their lifetimes.
+Fragments on distinct concrete object types can use different fields or arguments under one response name. Their response shapes must still be compatible, including leaf types and list/non-null wrappers. [Field-merging validation](https://spec.graphql.org/September2025/#sec-Field-Selection-Merging)
 
-A **resolver map** associates schema type names with their implementations. This object structure is a GraphQL Tools API, not GraphQL syntax or a specification requirement.
+### 3. Resolving Fields
 
-For an object type, the basic structure is **type name → field name → field resolver**. A field entry accepts either a function or a **field configuration object**:
+#### 3.1 Field Resolvers and Resolver Maps
+
+A field resolver supplies the value of one field on one schema object type. It can read, fetch, or compute that value.
+
+A resolver map associates schema types and fields with their implementations:
+
+```javascript
+const resolvers = {
+  Query: {
+    greeting: () => "Hello",
+  },
+};
+```
+
+The structure is **type name → field name → resolver**. This example implements the schema field `Query.greeting`.
+
+Resolver maps are a GraphQL Tools API. Core GraphQL does not prescribe this registration structure.
+
+#### 3.2 Resolver-Map Entries
+
+A field function is shorthand for a configuration object containing `resolve`:
 
 ```javascript
 const shorthand = { Query: { greeting: () => "Hello" } };
 const explicit = { Query: { greeting: { resolve: () => "Hello" } } };
 ```
 
-These register equivalent behavior. The callback key is `resolve`. A subscription field can also provide `subscribe`, which establishes its event stream; `resolve` supplies the field value for each event. Section 8 develops that distinction. These are specific callback roles, not an arbitrary sequence of lifecycle hooks.
+A subscription field can also register `subscribe`, which supplies its event stream. Its `resolve` callback supplies a field value for each event.
 
-Top-level keys identify existing schema types. Capitalizing type names is a naming convention. **Root operation types** are the object types assigned to the query, mutation, and subscription roles. Their default names are `Query`, `Mutation`, and `Subscription`, but those names are not reserved. With `schema { query: ReadRoot }`, the resolver-map key is `ReadRoot`. [Root operation types](https://spec.graphql.org/September2025/#sec-Root-Operation-Types)
+Other schema types use different entries:
 
-The shape beneath a type name depends on its kind:
-
-| Schema type kind | Resolver-map entry |
+| Type kind | Entry |
 | --- | --- |
-| Object, including a root operation type | Field entries; optional `__isTypeOf` callback to check whether a runtime value belongs to this type |
-| Interface or union | `__resolveType` callback to identify the concrete object type of a runtime value |
-| Scalar | Scalar implementation, with callbacks such as `serialize`, `parseValue`, and `parseLiteral` |
-| Enum | Enum member names mapped to internal application values |
+| Object | Field resolvers; optional `__isTypeOf` to recognize values of the type |
+| Interface or union | `__resolveType` to identify a value's concrete object type |
+| Scalar | Scalar implementation for input and output coercion |
+| Enum | Member names mapped to internal values |
 
-Scalar, enum, and runtime type behavior are developed in Section 4. Input objects have no field resolvers; input coercion processes their values. GraphQL Tools also supports interface field resolvers as an opt-in inheritance feature for implementing object types. [Resolver-map types](https://github.com/ardatan/graphql-tools/blob/master/packages/utils/src/Interfaces.ts)
+Type callbacks sit directly beneath the type name. They are not field callbacks. Input objects have no field resolvers.
 
-For object entries, ordinary keys must match schema fields. Keys such as `__isTypeOf` and `__resolveType` configure types and sit directly beneath the type name, not inside a field's configuration. The `__` prefix is reserved by GraphQL for introspection names; GraphQL Tools uses it here to distinguish type configuration from user-defined fields. It does not make every prefixed name a recognized callback. **`__typename` is an implicit GraphQL field, not a resolver-map callback.**
+Root operation types are ordinary object types assigned to the query, mutation, and subscription roles. With `schema { query: ReadRoot }`, the map uses `ReadRoot`, not `Query`. Capitalization is a naming convention.
 
-The map need not repeat every schema type or field. Omitted field resolvers use default field resolution, explained in Section 3.5. By default, GraphQL Tools rejects supplied type or field names that do not exist in the schema. [Registration implementation](https://github.com/ardatan/graphql-tools/blob/master/packages/schema/src/addResolversToSchema.ts)
+Ordinary keys must match schema types and fields. The map need not repeat every type or field; omitted field resolvers use default resolution.
 
-#### 3.2 Registering Resolvers and Starting Execution
+GraphQL Tools reserves specific `__` keys for type configuration. `__typename` is an implicit GraphQL field, not a resolver-map callback. [Resolver-map API](https://the-guild.dev/graphql/tools/docs/resolvers)
 
-Registration happens during schema setup. `makeExecutableSchema` combines SDL declarations and a resolver map into an **executable schema**: a GraphQL.js `GraphQLSchema` with the registered implementation callbacks.
+#### 3.3 Registering Resolvers
+
+Registration combines schema declarations with their implementations before requests execute:
 
 ```javascript
 import { makeExecutableSchema } from "@graphql-tools/schema";
@@ -1541,16 +1600,28 @@ const resolvers = {
 
 const schema = makeExecutableSchema({ typeDefs, resolvers });
 const result = await graphql({ schema, source: "{ welcome: greeting }" });
-// result.data: { welcome: "Hello" }
 ```
 
-`typeDefs` is an application-supplied SDL string, parsed internally by `makeExecutableSchema`; it can also be a pre-parsed SDL document. The engine calls the registered `Query.greeting` resolver. The alias determines the response key, not the implementation selected. `graphql()` receives the executable schema; it does not accept a resolver map. [Executable schema construction](https://the-guild.dev/graphql/tools/docs/generate-schema)
+`typeDefs` is an SDL string supplied by the application. `makeExecutableSchema` parses it; a parsed SDL document is also accepted.
 
-GraphQL.js also supports constructing schema types directly in JavaScript and assigning `resolve` and `subscribe` on field definitions. GraphQL Tools supplies the SDL-plus-map registration API used here.
+The resulting executable schema is a GraphQL.js `GraphQLSchema` containing the registered callbacks. The result is:
 
-**Execution entry points.** In GraphQL.js, `graphql()` accepts document text as `source`, parses it, validates it against the schema, and starts execution. The lower-level `execute()` accepts a parsed document as `document`; the caller must arrange document validation beforehand. It still selects the operation and coerces runtime variables. `parse()` alone does not validate a document against a schema. Subscription streams use the separate `subscribe()` entry point introduced in Section 8. [Request pipeline](https://github.com/graphql/graphql-js/blob/16.x.x/src/graphql.ts), [Execution implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/execute.ts)
+```json
+{ "data": { "welcome": "Hello" } }
+```
 
-Execution options supply `variableValues` for document variables and `operationName` to select an operation when a document contains several. They also supply `rootValue` and `contextValue`, described below. These calls run in process; an HTTP handler or other transport adapter can call them and deliver the result.
+The engine calls `Query.greeting`; the alias controls the response key.
+
+GraphQL.js also supports constructing schema types directly in JavaScript, with callbacks on their field definitions. `graphql()` receives the resulting schema, not a resolver map.
+
+#### 3.4 Execution Entry Points
+
+| GraphQL.js API | Work performed |
+| --- | --- |
+| `parse(source)` | Parse document text into an abstract syntax tree (AST) |
+| `validate(schema, document)` | Check the parsed document against the schema |
+| `execute(options)` | Select an operation, coerce variables, and execute a parsed document |
+| `graphql(options)` | Check the schema, parse the source, validate the document, and execute |
 
 To validate without executing:
 
@@ -1561,19 +1632,44 @@ const document = parse("{ greeting }");
 const errors = validate(schema, document);
 ```
 
-`parse()` throws on invalid syntax; `validate()` returns an error array, empty when valid. No field resolvers run. Use `execute()` when these steps are handled separately, for example to reuse a parsed, validated document across requests. Reuse does not skip runtime variable coercion, and cached validation depends on the document, schema, and validation rules remaining applicable.
+`parse()` throws on invalid syntax. `validate()` returns an error array, empty when valid. No field resolvers run.
 
-#### 3.3 Coercing Field Arguments and Applying Argument Defaults
+Use `execute()` when parsing and validation are handled separately, such as when reusing a validated document. Validation must still apply to the current schema and rules; each execution still coerces its supplied variables.
 
-Before a field's resolver runs, the engine prepares its arguments. Literals undergo input coercion; variable references use already-coerced variable values. An omitted argument or absent variable permits the argument's schema default to apply.
+The execution options include:
 
-For this schema field:
+| Option | Purpose |
+| --- | --- |
+| `source` / `document` | Document text for `graphql()` / parsed document for `execute()` |
+| `operationName` | Select an operation |
+| `variableValues` | Supply variables |
+| `rootValue` | Supply the initial parent value |
+| `contextValue` | Supply shared application data |
 
-```graphql
-posts(limit: Int = 10): [Post]
+Subscription streams use the separate `subscribe()` entry point in Section 8.
+
+#### 3.5 Resolver Parameters
+
+An explicitly registered GraphQL.js resolver receives four positional parameters:
+
+```javascript
+resolve(parent, args, context, info)
 ```
 
-And this operation:
+| Parameter | Contents |
+| --- | --- |
+| `parent` | Runtime value representing the object whose field is executing |
+| `args` | Prepared arguments for this field |
+| `context` | Application data shared across the execution |
+| `info` | Engine metadata about this field execution |
+
+The names are conventional; the positions define the API. Unused parameters can be omitted.
+
+#### 3.6 Field Arguments
+
+Before calling a resolver, the engine coerces literal arguments and substitutes already-coerced variable values.
+
+For a schema field `posts(limit: Int = 10): [Post]`:
 
 ```graphql
 query GetPosts($limit: Int = 20) {
@@ -1581,19 +1677,19 @@ query GetPosts($limit: Int = 20) {
 }
 ```
 
-| Variables | Prepared field argument |
+| Variables | `args.limit` |
 | --- | --- |
-| `{ "limit": 5 }` | `limit: 5` |
-| `{}` | `limit: 20`, from the variable default |
-| `{ "limit": null }` | `limit: null`; defaults do not replace null |
+| `{ "limit": 5 }` | `5` |
+| `{}` | `20`, from the variable default |
+| `{ "limit": null }` | `null` |
 
-Removing the variable default makes `{}` leave `$limit` absent, so the argument receives its schema default, `10`.
+Removing the variable default leaves an omitted `$limit` absent, so the field's schema default supplies `10`.
 
-In GraphQL.js, prepared arguments reach the resolver as its second parameter, conventionally `args`. Here the resolver reads `args.limit`, regardless of the variable name used by the operation. [Argument coercion implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/values.ts)
+The resolver reads the schema argument name, `args.limit`, regardless of the operation's variable name.
 
-#### 3.4 Root and Parent Values
+#### 3.7 Parent and Root Values
 
-The resolver's first parameter is the **parent value**: the runtime value representing the object whose field is being resolved.
+For this selection:
 
 ```graphql
 {
@@ -1607,80 +1703,120 @@ The resolver's first parameter is the **parent value**: the runtime value repres
 
 | Resolver | Parent value |
 | --- | --- |
-| `Query.user` | The server-supplied root value |
-| `User.manager` | The value returned by `Query.user` |
-| `User.name` | The value returned by `User.manager` |
+| `Query.user` | Supplied `rootValue` |
+| `User.manager` | Value returned by `Query.user` |
+| `User.name` | Value returned by `User.manager` |
 
-The engine passes these values between calls. Each resolver receives its immediate parent, not an automatic chain of ancestor objects. Applications can explicitly carry ancestor references when needed.
+Each resolver receives its immediate parent. The engine does not supply a chain of ancestor objects.
 
-Parent data may include internal properties the client never selects. For example, `User.manager` can use `parent.managerId` to fetch a manager. The root value starts this chain; it is runtime data, distinct from the schema's `Query` type.
+Parent values can contain internal properties. `User.manager` could fetch a manager using `parent.managerId`, even though the client never selects that property.
 
-Pass it through the execution option `rootValue`. If omitted, GraphQL.js root field resolvers receive `undefined` as their parent; an explicitly registered resolver can still work without using that parameter.
+`rootValue` is runtime data, separate from the schema's root operation type. When omitted, GraphQL.js passes `undefined` to root field resolvers.
 
-#### 3.5 Default Field Resolution
+#### 3.8 Default Field Resolution
 
-When no explicit field resolver is registered, GraphQL.js uses a default resolver. It reads the parent property matching the schema field name. If that property is a function, it calls the function as a method of the parent object.
+Without an explicit resolver, GraphQL.js reads the parent property matching the schema field name.
 
-If `Query.user` returns `{ id: "7", name: "Alice" }`, the default resolver can supply both `User.id` and `User.name`. Selecting `displayName: name` still reads `parent.name`.
+If `Query.user` returns `{ id: "7", name: "Alice" }`, default resolution supplies `User.id` and `User.name`. An alias such as `displayName: name` still reads `parent.name`.
 
-Property functions invoked by the default resolver receive `(args, context, info)` and are called with the parent as JavaScript `this`. They do not receive a separate `parent` parameter.
+A function-valued property is called as a method with `(args, context, info)` and the parent as `this`.
 
-These defaults are library behavior, not a property-lookup algorithm required by GraphQL. Schema and document validation do not guarantee implementation completeness: a missing property can produce `undefined`, which GraphQL.js treats as null during completion. A non-null field then fails. [Default resolution implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/execute.ts)
+Default resolution is library behavior. A schema can validate even when a selected field has no usable implementation. A missing property produces `undefined`, which becomes null in the response; a non-null field then fails.
 
-#### 3.6 Shared Context and Execution Metadata
+#### 3.9 Asynchronous Resolvers
 
-**Context** carries application-supplied information shared across an execution, such as the authenticated user and service references. Create it in the code that starts execution, before any resolver runs:
-
-```javascript
-const result = await graphql({
-  schema,
-  source: '{ user(id: "7") { name } }',
-  contextValue: { database, currentUser },
-});
-```
-
-Here `graphql` is imported from the `graphql` package; `schema`, `database`, and `currentUser` are prepared by the application. Server frameworks commonly expose a context-building callback. `rootValue` is a separate execution option, supplying top-level resolvers' parent value. [GraphQL.js execution inputs](https://github.com/graphql/graphql-js/blob/16.x.x/src/graphql.ts)
-
-**Lifetime and ownership.** Building a schema registers functions; executing an operation calls them. The application can reuse one schema and its registered functions across concurrent operations. Registration does not create a separate resolver instance per request.
-
-| Value | Scope |
-| --- | --- |
-| Schema and registered functions | Reusable across operations |
-| `rootValue` and `contextValue` | Supplied by the caller for an execution; GraphQL.js does not clone them |
-| Resolver `parent`, `args`, and `info` | Describe the current field invocation |
-| Services or caches referenced by context | Have the lifetime of their own instances; placing them in context does not recreate them |
-
-Creating a fresh context for each query or mutation execution is an application pattern. A fresh context may reference a shared database pool and a newly created request cache. State captured by a registered resolver's closure remains shared for as long as that function is reused. Subscription lifetimes are addressed in Section 8.2.
-
-Context APIs and mutability are implementation-specific. GraphQL.js passes the same supplied value without enforcing immutability. Treat its properties as stable: using mutations to communicate between resolvers creates execution-order dependencies. Referenced services may manage their own internal state through their interfaces. Even a thread-safe container does not establish an ordering between resolver calls.
-
-**Execution metadata** includes the schema field name, contributing field AST nodes, declared return type, schema, operation, fragments, and prepared variables. GraphQL.js also exposes the initial `rootValue`; it does not retain a general chain of resolved ancestor objects. This API is implementation-specific. [GraphQLResolveInfo](https://github.com/graphql/graphql-js/blob/16.x.x/src/type/definition.ts)
-
-A **response path** identifies the current result's position inside `data`. It uses aliases and zero-based list indices, without the outer `data` key. For `{ viewer: user(id: "7") { friends { name } } }`, the first friend's name has path `["viewer", "friends", 0, "name"]`. GraphQL.js represents `info.path` as linked segments with `key` and `prev`; following `prev` retrieves path segments, not parent data. [Path representation](https://github.com/graphql/graphql-js/blob/16.x.x/src/jsutils/Path.ts)
-
-`info.returnType` is a schema type class instance. For `[User!]!`, it references a `GraphQLNonNull` whose `.ofType` is a `GraphQLList`, containing another `GraphQLNonNull`, containing the `GraphQLObjectType` for `User`. `String(info.returnType)` produces `"[User!]!"`. It describes the declared requirement, not a type inferred from the resolver's result.
-
-#### 3.7 Synchronous and Asynchronous Resolvers
-
-GraphQL.js resolvers can return a value directly or a Promise for that value. The engine waits for a Promise before completing the field; child resolvers receive the resolved value.
-
-This also works for function-valued properties called by the default resolver:
+GraphQL.js resolvers can return a value or a Promise:
 
 ```javascript
-const user = {
-  async name() {
-    return "Alice";
+const resolvers = {
+  Query: {
+    greeting: async () => "Hello",
   },
 };
 ```
 
-A rejected Promise is handled as a field execution error, like a synchronous throw. Synchronous and asynchronous resolvers can coexist in one operation. Their scheduling is covered in Section 6. [Async execution handling](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/execute.ts)
+The engine awaits the value. Child resolvers receive the resolved value.
 
-#### 3.8 Resolver Wrapping as an Application Pattern
+Function-valued properties called by the default resolver can also be asynchronous. A rejected Promise produces a field execution error, like a synchronous throw.
 
-A resolver wrapper is an ordinary **higher-order-function pattern**, not a GraphQL concept or required execution stage. It replaces a resolver with a function that adds shared behavior around its call.
+#### 3.10 Context
 
-For a resolver expected to return a string:
+Context carries shared application data, such as the current user and database access:
+
+```javascript
+const result = await graphql({
+  schema,
+  source,
+  contextValue: { database, currentUser },
+});
+```
+
+The application supplies context before execution. Server frameworks can expose a callback for constructing it.
+
+GraphQL.js passes the same context value to resolvers without cloning it or enforcing immutability. Context APIs and mutability differ between implementations.
+
+Keep context properties stable during execution. Using one resolver to set data for another creates an execution-order dependency. Services referenced by context can manage their own state.
+
+#### 3.11 Execution Lifetimes
+
+| Value | Lifetime |
+| --- | --- |
+| Schema and registered resolvers | Reusable across operations |
+| Root and context values | Supplied for an execution |
+| `parent`, `args`, and `info` | Describe a field invocation |
+| Services referenced by context | Lifetime of the service instance |
+
+Creating a fresh context per request is an application pattern. It can contain both shared services and request-specific caches.
+
+Registering a resolver does not create a separate instance per request. State captured by its closure remains shared while the function is reused.
+
+#### 3.12 Execution Metadata
+
+GraphQL.js supplies `info` to describe the current field execution:
+
+| Property | Contents |
+| --- | --- |
+| `fieldName` | Schema field name |
+| `fieldNodes` | AST nodes for the collected field selections |
+| `returnType` | Declared output type |
+| `path` | Position in the response |
+| `schema` | Executable schema |
+| `operation`, `fragments` | Parsed operation and fragment definitions |
+| `variableValues` | Coerced variables |
+| `rootValue` | Initial root value |
+
+These are GraphQL.js API properties. They are not additional resolver arguments required by the specification.
+
+#### 3.13 Response Paths
+
+A response path identifies a position inside `data`, using response names and zero-based list indices.
+
+For `{ viewer: user { friends { name } } }`, the first friend's name has path:
+
+```json
+["viewer", "friends", 0, "name"]
+```
+
+GraphQL.js represents `info.path` as linked segments with `key` and `prev`. Following `prev` retrieves path segments, not ancestor data.
+
+#### 3.14 Return Types
+
+`info.returnType` is a schema type instance, not a type inferred from the resolver's result.
+
+For `[User!]!`, the instances nest as follows:
+
+```mermaid
+flowchart LR
+    A[GraphQLNonNull] -->|ofType| B[GraphQLList]
+    B -->|ofType| C[GraphQLNonNull]
+    C -->|ofType| D[GraphQLObjectType: User]
+```
+
+`String(info.returnType)` produces `"[User!]!"`.
+
+#### 3.15 Resolver Wrappers
+
+A resolver wrapper adds behavior around another resolver:
 
 ```javascript
 const withUppercase = resolve =>
@@ -1690,19 +1826,23 @@ const withUppercase = resolve =>
   };
 ```
 
-Registering `withUppercase(original)` preserves the original inputs, supports direct values or promises, and propagates failures. This wrapper assumes a string result; it is not a general wrapper for every return type.
+Register `withUppercase(original)` in place of a resolver that returns a string. The wrapper forwards inputs, awaits the result, and transforms it.
 
-With `outer(inner(original))`, calls enter `outer`, then `inner`, then `original`; results pass back through the wrappers in reverse order. Libraries can help attach and compose wrappers, but the engine simply calls the resulting function. A field wrapper cannot intercept work that occurs before its field is invoked, such as field collection. [Resolver composition](https://the-guild.dev/graphql/tools/docs/resolvers-composition)
+This is an ordinary higher-order-function pattern. The engine calls the registered function; it has no separate wrapper stage.
 
-#### 3.9 Implementing Directive Behavior
+With `outer(inner(original))`, calls enter from outer to inner; results return in reverse order.
 
-**Query directives** can be inspected through the contributing field nodes in `info.fieldNodes`. For a directive declared as:
+#### 3.16 Reading Query Directives
+
+Resolvers can inspect directives on collected field selections through `info.fieldNodes`.
+
+For this directive:
 
 ```graphql
 directive @uppercase(enabled: Boolean! = true) on FIELD
 ```
 
-GraphQL.js can prepare its arguments for a selected field node:
+GraphQL.js prepares its arguments on one field node with:
 
 ```javascript
 import { getDirectiveValues } from "graphql";
@@ -1714,9 +1854,15 @@ const options = getDirectiveValues(
 );
 ```
 
-Here `fieldNode` is one entry in `info.fieldNodes`. The helper returns `undefined` when the directive is absent, `{ enabled: true }` when its default applies, or its supplied argument values with variables resolved. Application code implements the behavior. Directives on operations or fragments remain on those nodes; they are not copied onto child field nodes. [Query directive handling](https://www.graphql-js.org/docs/using-directives/#implementing-custom-directive-behavior)
+`fieldNode` is an entry in `info.fieldNodes`. The result is `undefined` when the directive is absent, or its arguments with variables and defaults applied.
 
-**Schema directives** can select resolvers for wrapping during setup. For this separate directive definition:
+Application code supplies the behavior. Directives on operations and fragments remain on those nodes; they are not copied onto child fields.
+
+A resolver runs after collection. Returning null cannot reproduce `@skip`'s omission of a field.
+
+#### 3.17 Applying Schema Directives
+
+A schema directive can select fields for resolver wrapping during setup:
 
 ```graphql
 directive @uppercase on FIELD_DEFINITION
@@ -1726,7 +1872,7 @@ type Query {
 }
 ```
 
-GraphQL Tools can install the preceding wrapper on annotated fields:
+After registering the application resolvers, GraphQL Tools can transform the schema:
 
 ```javascript
 import { defaultFieldResolver } from "graphql";
@@ -1745,36 +1891,46 @@ const executableSchema = mapSchema(schema, {
 });
 ```
 
-`schema` already contains the application resolvers. `mapSchema` transforms the constructed schema's field configurations, not the SDL syntax tree directly. `getDirective` reads retained directive metadata. The transformation returns a new schema with updated references; the original resolver is called by its replacement wrapper. Execute requests against `executableSchema`.
+`mapSchema` transforms constructed field configurations and returns a new schema. It does not directly edit the SDL syntax tree. `getDirective` reads the retained annotation.
 
-The annotation is read during setup; uppercasing happens when the field executes. These are library APIs, not an automatic GraphQL directive pipeline. [Schema transformations](https://the-guild.dev/graphql/tools/docs/schema-directives#implementing-schema-directives)
+Execute requests against `executableSchema`. The annotation is read during setup; the wrapper runs during field execution. [Schema directive implementation](https://the-guild.dev/graphql/tools/docs/schema-directives#implementing-schema-directives)
 
-**Grouping and repeatability** impose separate considerations on query directives:
+#### 3.18 Directives on Merged Selections
 
-| Applications | Requires `repeatable`? | Resolver metadata |
+Repeatability applies to document locations, not resolver invocations:
+
+| Applications | Requires `repeatable`? | `info.fieldNodes` |
 | --- | --- | --- |
-| Twice on one field selection | Yes | One field node with two directive nodes |
-| Once on each of two merged selections | No | Two field nodes, each with one directive node |
+| Twice on one field selection | Yes | One node containing two directives |
+| Once on each of two merged selections | No | Two nodes containing one directive each |
 
-Non-repeatable means once per document location, not once per resolver invocation. Custom directives may therefore supply conflicting settings across merged selections. Define a policy, such as requiring agreement through custom validation or enabling behavior when any selection requests it. Reading only `info.fieldNodes[0]` implicitly gives the first selection control.
+Merged selections can therefore supply conflicting settings for a custom directive. Its implementation must define how to combine them. Reading only the first field node gives that selection control.
 
-GraphQL.js's `getDirectiveValues` reads the first matching application on a node; it does not aggregate repeatable applications. Handling those requires inspecting all their directive nodes. [Directive argument helper](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/values.ts)
+`getDirectiveValues` reads the first matching directive on a node. Repeatable applications require inspecting the individual directive nodes.
 
-For built-in `@skip` and `@include`, filtering precedes grouping: skipping one occurrence does not veto a surviving occurrence. Only surviving field nodes and their child selections contribute to execution. Custom resolver-based behavior runs after this filtering. [Field collection](https://spec.graphql.org/September2025/#sec-Field-Collection)
+Built-in `@skip` and `@include` filter each occurrence before grouping. A skipped occurrence does not cancel a surviving occurrence. Only surviving nodes contribute to the resolver call.
 
-### 4. Completing the Resolved Value
+### 4. Completing Values
 
-#### 4.1 Resolved Values vs. Response Values
+#### 4.1 Value Completion
 
-**Value completion** turns a resolver's internal result into the response value required by its declared output type. Scalar and enum values undergo result coercion; objects require child-field execution; lists require item completion. Nullability determines how failures propagate, covered in Section 5.
+Value completion turns a resolver's result into the response value required by its declared output type.
 
-Validation establishes that the document is valid against the schema. It cannot guarantee that application code will return valid values at execution time.
+| Output type | Completion |
+| --- | --- |
+| Scalar or enum | Coerce the result to a response value |
+| Object | Execute selected child fields |
+| Interface or union | Identify the concrete object type, then execute child fields |
+| List | Complete each item |
+| Non-null | Require successful completion with a non-null value |
 
-There is no required canonical intermediate format. An engine uses native values while enforcing GraphQL's result rules, then the response is serialized for transport. Serializing one custom scalar and serializing the entire response are distinct operations.
+Document validation checks the operation against the schema. Completion checks the values produced by application code.
 
-#### 4.2 Scalar and Enum Result Coercion
+The engine can use native internal values. There is no required intermediate format; transport serialization happens after completion.
 
-**Scalar outputs.** Input and output coercion have different acceptance rules. These GraphQL.js v16 examples show result coercion, not permission for clients to supply the same values as inputs:
+#### 4.2 Scalar Results
+
+Input and output coercion have different acceptance rules. GraphQL.js v16 accepts these output conversions:
 
 | Declared output | Resolver result | Completed value |
 | --- | --- | --- |
@@ -1784,9 +1940,11 @@ There is no required canonical intermediate format. An engine uses native values
 | `Int` | `2.5` | Execution error |
 | `Float` | `Infinity` | Execution error |
 
-GraphQL specifies the resulting scalar's constraints; implementations choose supported conversions from internal values within those constraints. [GraphQL.js scalar implementations](https://github.com/graphql/graphql-js/blob/16.x.x/src/type/scalars.ts)
+GraphQL defines the result's constraints. Implementations choose conversions from internal values within those constraints. These output conversions do not permit the same values as client inputs. [GraphQL.js scalar coercion](https://github.com/graphql/graphql-js/blob/16.x.x/src/type/scalars.ts)
 
-**Custom scalar output.** For `scalar DateTime` and a field `now: DateTime`, an application can return a JavaScript `Date` and serialize it to a string:
+#### 4.3 Custom Scalar Results
+
+A custom scalar supplies its own result coercion through `serialize`:
 
 ```javascript
 import { GraphQLScalarType } from "graphql";
@@ -1807,30 +1965,38 @@ const resolvers = {
 };
 ```
 
-This example supplies only the output implementation. Invalid dates also fail because `toISOString()` throws. The client receives a string, not a JavaScript `Date`. A scalar serializer throwing, or returning null for a non-null internal value, produces an execution error. [Custom scalars](https://www.graphql-js.org/docs/custom-scalars/)
+For `scalar DateTime` and `now: DateTime`, the resolver returns a JavaScript `Date`; the completed field contains a string.
 
-**Custom scalar inputs.** GraphQL.js v16 exposes separate callbacks for the two input representations:
+`serialize` converts one scalar value. Serializing the entire response to JSON is a separate operation.
 
-| Callback | Receives | Produces |
+Throwing from `serialize`, or returning null for a non-null internal value, produces an execution error. This example implements output handling only.
+
+#### 4.4 Custom Scalar Inputs
+
+GraphQL.js provides two input callbacks because variable values and literals have different representations:
+
+| Callback | Input | Output |
 | --- | --- | --- |
+| `parseValue` | Decoded variable value | Internal input value |
+| `parseLiteral` | Literal AST node | Internal input value |
 | `serialize` | Internal output value | Response scalar value |
-| `parseValue` | Decoded runtime input, such as a variable value | Internal input value |
-| `parseLiteral` | GraphQL literal AST node | Internal input value |
 
-An AST node preserves syntax that a decoded value may lose. The literals `5` and `5.0` have different node kinds, but generic decoding produces the number `5` for both.
+An AST node preserves syntax distinctions. `5` and `5.0` have different literal kinds, even though decoding either produces the JavaScript number `5`.
 
 | Input callbacks supplied | GraphQL.js v16 behavior |
 | --- | --- |
-| Only `parseValue` | Default `parseLiteral` decodes the AST and delegates to `parseValue` |
-| Both | Application controls value and literal handling separately |
-| Only `parseLiteral` | Rejected during scalar construction |
-| Neither | Default input handling passes decoded values through |
+| Only `parseValue` | Default `parseLiteral` decodes the literal and delegates to `parseValue` |
+| Both | Each callback handles its input representation |
+| Only `parseLiteral` | Scalar construction fails |
+| Neither | Decoded input values pass through |
 
-There is no SDL or `GraphQLScalarType` option declaring a primitive backing scalar. Application callbacks can reuse built-in scalar coercion methods, but must define the custom contract. Inspect literal kinds when the contract depends on syntax distinctions that generic decoding loses. [Scalar callback defaults](https://github.com/graphql/graphql-js/blob/16.x.x/src/type/definition.ts)
+There is no option declaring a primitive backing scalar. Callbacks define the contract and can reuse built-in scalar coercion methods.
 
-Literal rejection need not wait for execution: GraphQL.js document validation invokes `parseLiteral`, including its default delegation. Runtime variable values instead reach `parseValue` during variable coercion. SDL or introspection alone does not expose those executable checks. [Literal validation](https://github.com/graphql/graphql-js/blob/16.x.x/src/validation/rules/ValuesOfCorrectTypeRule.ts)
+Document validation invokes `parseLiteral`, so invalid literals can be rejected before execution. Variable coercion invokes `parseValue`. SDL alone does not describe these executable checks. [Scalar callback defaults](https://github.com/graphql/graphql-js/blob/16.x.x/src/type/definition.ts)
 
-**Enum outputs.** The response uses the schema's enum member name; the application may use a different internal value. For `enum Status { OPEN CLOSED }`, a GraphQL Tools resolver map can define:
+#### 4.5 Enum Values
+
+An enum's internal values can differ from its schema names:
 
 ```javascript
 const resolvers = {
@@ -1839,15 +2005,15 @@ const resolvers = {
 };
 ```
 
-With `status: Status`, the completed result is `"OPEN"`. Returning an unmapped value such as `2` fails. Input coercion performs the reverse mapping from member name to internal value; without a custom mapping, the internal value is the member name. [Enum internal values](https://the-guild.dev/graphql/tools/docs/scalars#internal-values)
+For `enum Status { OPEN CLOSED }` and `status: Status`, the response contains `"OPEN"`. Returning an unmapped value such as `2` fails.
 
-GraphQL.js also permits symbols as internal enum values. If `OPEN` maps to a particular `Symbol("OPEN")`, return that same symbol instance; another symbol with the same description is a different value.
+Input coercion reverses the mapping. Without a custom mapping, the member name is also the internal value.
 
-#### 4.3 Object Results: Repeating Collection, Resolution, and Completion
+GraphQL.js permits symbols as internal enum values. Return the same symbol instance used in the mapping; another symbol with the same description is a different value.
 
-An object result becomes the parent for its selected child fields. The engine repeats field collection, resolution, and completion for that object; it does not copy the returned record into the response or structurally check it against every schema field.
+#### 4.6 Object Results
 
-For `user: User` and `User.name: String`:
+An object result becomes the parent for its selected child fields:
 
 ```javascript
 const resolvers = {
@@ -1860,13 +2026,21 @@ const resolvers = {
 };
 ```
 
-The query `{ user { name } }` produces `{"data":{"user":{"name":"Alice"}}}`. Neither internal property is copied to the response. The schema requirement applies to the completed `name` field, whose value came from application code. If `user` resolves to null, its child fields do not execute.
+For `{ user { name } }`:
 
-#### 4.4 Interfaces and Unions: Determining the Object Type Before Recursing
+```json
+{ "data": { "user": { "name": "Alice" } } }
+```
 
-For an interface or union result, the engine must identify a permitted concrete object type before applying fragment conditions and executing its child fields. GraphQL requires that determination; the application and engine decide how to make it.
+The engine repeats collection, resolution, and completion for the child selections. It does not copy the internal object or check it structurally against every schema field.
 
-For example:
+If the parent result is null, its child fields do not execute.
+
+#### 4.7 Resolving Interfaces and Unions
+
+An interface or union result needs a concrete object type before fragment conditions and child fields can execute.
+
+For this schema:
 
 ```graphql
 union SearchResult = User | Topic
@@ -1876,7 +2050,7 @@ type Topic { name: String }
 type Query { search: SearchResult }
 ```
 
-With a discriminator already matching the schema type name, the resolver map can be direct:
+A resolver map can identify the type from an application discriminator:
 
 ```javascript
 const resolvers = {
@@ -1889,11 +2063,24 @@ const resolvers = {
 };
 ```
 
-`__resolveType` is GraphQL Tools' resolver-map name for the GraphQL.js type option `resolveType`. It chooses a type for an existing value; it does not fetch the value or resolve its child fields. Translating a discriminator is needed only when application values differ from schema type names.
+`__resolveType` configures GraphQL.js's `resolveType` callback. It identifies the type of an existing value; it does not fetch the value or resolve its fields.
 
-**Default type resolver.** If no custom `resolveType` is configured, GraphQL.js's default type resolver first reads a string `__typename` property from the value. Without that property, it tries application-provided `isTypeOf` checks on the possible object types. The engine supplies the fallback procedure; the checks themselves are custom code.
+The returned name must identify a permitted object type. Failure to identify one produces an execution error.
 
-For example, omit `SearchResult.__resolveType` and return `{ __typename: "User", name: "Alice" }`. Alternatively, return `{ kind: "User", name: "Alice" }` and register checks:
+#### 4.8 Default Type Resolution
+
+Without a configured `resolveType`, GraphQL.js's default type resolver tries:
+
+1. A string `__typename` property on the value.
+2. Application-provided `isTypeOf` checks on possible object types.
+
+For the first approach, return:
+
+```javascript
+{ __typename: "User", name: "Alice" }
+```
+
+For the second, register recognition callbacks:
 
 ```javascript
 const resolvers = {
@@ -1902,18 +2089,15 @@ const resolvers = {
 };
 ```
 
-`__isTypeOf` is the resolver-map name for `isTypeOf`. Failure to identify an allowed type is an execution error; GraphQL.js does not infer one by comparing the object's properties with schema fields. A custom `resolveType` replaces the fallback: returning null from it does not trigger another attempt through `__typename` or `isTypeOf`. [Abstract type resolution](https://www.graphql-js.org/docs/abstract-types/)
+The fallback procedure is built in; the recognition checks are application code. GraphQL.js does not infer the type by matching properties against schema fields.
 
-An object type's `isTypeOf` check, when configured, also verifies values during object completion, even when the concrete type was already determined. This is application-defined recognition, not automatic structural validation. [Object completion implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/execute.ts)
+A custom `resolveType` replaces the fallback. Returning null from it does not trigger another attempt.
 
-**Returning the type name to the client.** Two uses of `__typename` must be distinguished:
+When configured, `isTypeOf` also checks values during object completion, including fields whose concrete type is already known. [Abstract type resolution](https://www.graphql-js.org/docs/abstract-types/)
 
-| Use | Authority |
-| --- | --- |
-| Select `__typename` in a query to receive the concrete type name | GraphQL specification |
-| Put `__typename` on a returned JavaScript object for default type resolution | GraphQL.js convention |
+#### 4.9 Returning the Type Name
 
-The query meta-field `__typename: String!` is implicit on objects, interfaces, and unions. It is valid without an SDL declaration and returns the type the engine determined, including when a custom callback identified it. It cannot be selected at a subscription root. [Type name introspection](https://spec.graphql.org/September2025/#sec-Type-Name-Introspection)
+The implicit field `__typename: String!` returns the concrete type name. It is available on objects, interfaces, and unions without an SDL declaration:
 
 ```graphql
 {
@@ -1925,71 +2109,73 @@ The query meta-field `__typename: String!` is implicit on objects, interfaces, a
 }
 ```
 
-The example produces `{"data":{"search":{"__typename":"User","name":"Alice"}}}`. Without selecting `__typename`, only `name` appears, and the client cannot distinguish otherwise identical results from the two types. Internal type identification does not automatically add the field to the response.
+```json
+{ "data": { "search": { "__typename": "User", "name": "Alice" } } }
+```
 
-#### 4.5 Lists: Completing Each Item by Its Declared Type
+| Use of `__typename` | Defined by |
+| --- | --- |
+| Selected field returning the concrete type name | GraphQL specification |
+| Internal object property used by default type resolution | GraphQL.js |
 
-For a list, complete each item according to the declared item type. `[Int]` applies integer result coercion to each item; `[SearchResult]` determines each item's concrete type separately; nested lists repeat list completion.
+The response includes the field only when selected. Without it, identical selections from different types can produce indistinguishable results.
 
-For `{ users { name } }` with `users: [User]`, a resolver returning `[{ displayName: "Alice" }, { displayName: "Bob" }]` causes Section 4.3's `User.name` resolver to run once for each object. Each receives its own list item as parent, producing `[{ "name": "Alice" }, { "name": "Bob" }]` within `data.users`.
+`__typename` cannot be selected at a subscription root.
 
-Item order is preserved even when asynchronous work finishes out of order. Output coercion does not wrap single values into lists: returning one user object for `[User]` fails; return `[user]`. List and item nullability are separate, covered in Section 5.4.
+#### 4.10 List Results
+
+The engine completes each list item according to the declared item type.
+
+For `users: [User]`, each item becomes the parent for its selected `User` fields. For `[SearchResult]`, each item needs its own concrete type determination.
+
+Item order is preserved even when asynchronous work finishes out of order.
+
+Output coercion does not wrap singleton values into lists. For `[User]`, GraphQL.js accepts an iterable such as `[user]`; returning one user object fails.
 
 ### 5. Nullability and Errors
 
-#### 5.1 Request Errors vs. Execution Errors
+#### 5.1 Request and Execution Errors
 
-For query and mutation execution, and for each subscription event's execution:
-
-| Category | Examples | Response |
+| Error category | Examples | Result |
 | --- | --- | --- |
-| Request error | Invalid syntax, unknown selected field, invalid runtime variable | `errors`, with no `data` key; execution does not begin |
-| Execution error | Resolver throws or rejects; result coercion fails | `data` and `errors`; successful data may survive |
+| Request | Invalid document, ambiguous operation selection, invalid variables | `errors` without `data`; execution does not begin |
+| Execution | Resolver throws, Promise rejects, result coercion fails | `data` and `errors`; successful data may survive |
 
-An absent `data` key is distinct from an execution result whose `data` is null. Subscription source-stream setup has separate failure handling, covered in Section 8.3. [GraphQL.js errors](https://www.graphql-js.org/docs/graphql-errors/)
+An absent `data` key differs from `"data": null` after failed execution. A successful result omits `errors`; it does not contain an empty error list.
 
-#### 5.2 Resolver Outcomes: Values, Nulls, and Errors
+Subscription stream setup has separate error handling in Section 8.
+
+#### 5.2 Null vs. Failure
 
 | Resolver outcome | Nullable field | Non-null field |
 | --- | --- | --- |
-| Returns null | Null without an error | Engine records an error and propagates null |
-| Throws or rejects | Null with an error | Error is recorded and null propagates |
+| Returns null | Null without an error | Error and null propagation |
+| Throws or rejects | Null with an error | Error and null propagation |
 
-Returning null for a missing user can therefore produce `{"data":{"user":null}}` with no error. A failed database lookup can produce the same data plus an error entry. Successful executions omit `errors`; they do not return an empty error list.
+Returning null for a missing user can produce:
 
-An expected application outcome can also be ordinary schema data:
-
-```graphql
-union UserLookupResult = User | UserNotFound
-
-type UserNotFound {
-  message: String!
-}
+```json
+{ "data": { "user": null } }
 ```
 
-A field returning this union can resolve to `UserNotFound` and complete its selected fields successfully. There is no GraphQL execution error merely because the application calls the outcome a failure. Nullable data is sufficient when absence alone expresses the outcome; an explicit result type can carry additional distinctions or details.
+A failed lookup can produce the same data with an error entry. Null alone does not identify which outcome occurred.
 
-**Using partial data.** The application decides whether surviving fields suffice for its action. A profile can remain useful when recommendations fail; a calculation requiring a failed input cannot proceed. A failed null must not silently become a claim that no data exists.
+#### 5.3 Error Entries
 
-Client handling varies. Apollo Client 4 discards partial response data by default; `errorPolicy: "all"` exposes data and errors separately, leaving field association through error paths to application code. Relay's client-specific `@catch` can expose a selected field as a success/error result, distinguishing an ordinary null from a failure. That wrapper is a client representation, not the GraphQL wire format. Rejecting partial results is also a valid application policy. [Apollo error policies](https://www.apollographql.com/docs/react/data/error-handling), [Relay field errors](https://relay.dev/docs/guides/catch-directive/)
+| Key | Meaning | Presence |
+| --- | --- | --- |
+| `message` | Human-readable error description | Required |
+| `path` | Response position associated with the error | Required when the error is associated with a field in the result |
+| `locations` | Document positions, with one-based `line` and `column` | Recommended when the error can be tied to document text |
+| `extensions` | Additional application-defined error information | Optional |
 
-#### 5.3 Error Entries and Response Paths
+Message wording is not prescribed. Syntax, validation, and variable coercion errors have no execution response path.
 
-The GraphQL specification defines these error entries:
+Locations identify source text; paths identify result positions. The examples below omit locations for brevity. [Error format](https://spec.graphql.org/September2025/#sec-Errors)
 
-| Key | Requirement |
-| --- | --- |
-| `message` | **Must** appear on every error as a string; wording is not prescribed |
-| `path` | **Must** appear when the error is associated with a field in the result |
-| `locations` | **Should** appear when the error can be tied to document text; entries contain one-based `line` and `column` |
+#### 5.4 Non-Null Propagation
 
-`locations` is recommended, not guaranteed. Syntax, validation, and variable coercion errors have no execution response position and therefore no response path. Every field execution error has one. [Error format](https://spec.graphql.org/September2025/#sec-Errors)
-
-As with the execution metadata in Section 3.6, a path uses response names, including aliases, and zero-based list indices. `["users", 2, "age"]` identifies `data.users[2].age`. Locations point into the document; paths point to positions in the result. The following response examples omit document locations for brevity.
-
-#### 5.4 Non-Null Propagation Through Lists and Objects to the Root
-
-On an execution error, the affected position becomes null. If that position is non-null, null propagates outward until it reaches the first nullable position. The error is recorded once at its original path, even when propagation removes that path from the returned data.
+An execution error makes the affected position null. A non-null position propagates null outward until it reaches a nullable position.
 
 For this schema:
 
@@ -2012,24 +2198,61 @@ If `{ user { name age } }` resolves `name` successfully but `age` throws:
 }
 ```
 
-`age` cannot be null, so the containing user becomes null and its successful `name` is lost from the response. If `user` were also non-null (`User!`), the result would instead contain `"data": null` with the same error path. The top-level `data` value can always be null, regardless of schema non-null declarations. [Null propagation](https://www.graphql-js.org/docs/nullability/)
+The whole user becomes null, removing its successful `name` from the response.
 
-**List boundaries.** Suppose a `scores` resolver returns `[10, "oops", 30]`. The second item fails integer result coercion:
+If `user` were also non-null, the result would contain `"data": null`. The top-level `data` value can always be null.
+
+The error retains its original path and is recorded once, even when propagation removes that position from the result.
+
+#### 5.5 List Nullability
+
+Suppose `scores` returns `[10, "oops", 30]`. The second item fails integer result coercion:
 
 | Declared field type | Result |
 | --- | --- |
 | `[Int]` | `[10, null, 30]` |
 | `[Int]!` | `[10, null, 30]` |
-| `[Int!]` | The whole list becomes null |
-| `[Int!]!` | Null propagates to the field's parent and continues outward |
+| `[Int!]` | Null list |
+| `[Int!]!` | Null propagates to the field's parent |
 
-The error path is `["scores", 1]` in every case. The inner `!` governs items; the outer `!` governs the list. These rules compose with objects: for `users: [User!]` and `User.age: Int!`, one failing age makes its user invalid and therefore the whole list null. The path still identifies the original age, such as `["users", 1, "age"]`.
+The error path is `["scores", 1]` in each case.
 
-### 6. Query Execution and Data Fetching
+These rules compose with objects. For `users: [User!]` and `User.age: Int!`, one failed age makes its user null, which makes the whole list null. The path still identifies the age, such as `["users", 1, "age"]`.
 
-#### 6.1 Dependencies and Scheduling
+#### 5.6 Application Outcomes
 
-Query execution follows parent-value dependencies, not a guaranteed order between independent fields:
+An expected application failure can be represented as ordinary schema data:
+
+```graphql
+union UserLookupResult = User | UserNotFound
+
+type UserNotFound {
+  message: String!
+}
+```
+
+A field can resolve to `UserNotFound` and complete successfully. Calling an outcome a failure in the application does not make it a GraphQL execution error.
+
+Use nullable data when absence is sufficient; a result type can express additional outcomes or details.
+
+#### 5.7 Partial Results
+
+The client decides whether surviving data is sufficient. A profile can remain useful when recommendations fail; a calculation requiring failed inputs cannot proceed.
+
+Error paths associate failures with response positions. Client libraries differ in how they expose that association:
+
+| Client | Handling |
+| --- | --- |
+| Apollo Client 4 | Discards partial data by default; `errorPolicy: "all"` exposes data and errors separately |
+| Relay | Client-specific `@catch` can expose a field as a success/error result |
+
+These are client policies and representations. The GraphQL response carries `data` and `errors`. [Apollo error policies](https://www.apollographql.com/docs/react/data/error-handling), [Relay field errors](https://relay.dev/docs/guides/catch-directive/)
+
+### 6. Query Scheduling and Data Fetching
+
+#### 6.1 Field Dependencies
+
+Nested fields wait for their parent value. Independent fields have no guaranteed execution order:
 
 ```graphql
 {
@@ -2041,15 +2264,23 @@ Query execution follows parent-value dependencies, not a guaranteed order betwee
 }
 ```
 
-`user.name` and `user.manager` need the value returned by `Query.user`. The manager's name needs the value returned by `User.manager`. `serverVersion` is independent of the user branch.
+`User.name` and `User.manager` need the result of `Query.user`. The manager's name needs the result of `User.manager`. `serverVersion` is independent of that branch.
 
-Independent fields may overlap, but parallel execution is not required. The engine need not finish one depth of the query before beginning another. Query fields must be side-effect-free and idempotent, so correctness cannot depend on a sibling running first. Setting a context property in one sibling for another to read violates that independence. [Execution scheduling](https://spec.graphql.org/September2025/#sec-Normal-and-Serial-Execution)
+Independent work can overlap; parallel execution is not required. Execution need not finish one depth before beginning another.
 
-Response fields retain the order established by field collection: the first surviving occurrence of each response name determines its position, with fragments expanded where they appear. For `{ user { name age name } }`, the merged `name` precedes `age` in the response even if `age` finishes first. Response order does not establish resolver execution order.
+Query fields must be side-effect-free and idempotent. Application code upholds this by convention; GraphQL.js does not enforce resolver purity.
 
-#### 6.2 Repeated Fetches, Batching, and Request Caches
+#### 6.2 Response Order
 
-One GraphQL request can cause many backend requests. For `{ users { name manager { name } } }`, consider:
+Response fields follow collection order: the first surviving occurrence of each response name determines its position, with fragments expanded where they appear.
+
+For `{ user { name age name } }`, the merged `name` precedes `age`, even if `age` finishes first.
+
+Response order does not determine resolver execution order.
+
+#### 6.3 The N+1 Problem
+
+One GraphQL request can produce many backend requests:
 
 ```javascript
 const resolvers = {
@@ -2058,11 +2289,15 @@ const resolvers = {
 };
 ```
 
-If each database helper makes one request and `users` returns 100 items, execution makes 101 requests: one for the list and one per manager. This is the **N+1 problem**, even if many users share a manager. Field grouping does not combine separate list-item positions or deduplicate backend calls.
+For `{ users { manager { name } } }`, 100 users can cause 101 database requests: one for the list and one per manager.
 
-**Batching** combines lookups for multiple keys into one backend request. **Caching** reuses an earlier lookup for the same key. These are general optimization patterns, not GraphQL requirements; frameworks or application libraries can supply them. GraphQL.js does not automatically coordinate backend access. [N+1 and DataLoader](https://www.graphql-js.org/docs/n1-dataloader/)
+This is the **N+1 problem**. Field collection does not combine lookups across list items, even when several users share a manager.
 
-**DataLoader** is a generic batching and memoization utility with no dependency on GraphQL. Each resolver can request one value while the loader groups pending lookups. The application still supplies the batch-fetching function:
+Batching combines several lookups into one backend request. Caching reuses a lookup result. Both are general optimization patterns supplied by application code or libraries.
+
+#### 6.4 DataLoader
+
+DataLoader is a generic batching and memoization utility. Resolvers request individual values; the loader groups pending lookups for an application-provided batch function:
 
 ```javascript
 import DataLoader from "dataloader";
@@ -2085,15 +2320,19 @@ const resolvers = {
 };
 ```
 
-`getUsersByIds` is an application helper that fetches several users in one backend request. DataLoader requires one result per key in the same order; the mapping preserves that order and represents missing users as null. Each `.load()` returns a promise for its own result. [DataLoader batch contract](https://github.com/graphql/dataloader#batch-function)
+`getUsersByIds` fetches several users in one backend request. The batch function must return one result per key in the same order; this example represents missing users as null.
 
-Pass a fresh `createContext()` result as `contextValue` for each request. This scopes the loader and its cache to that request; the library does not reset a shared instance automatically. This is a usage convention, not a GraphQL rule. The engine simply awaits the resolver's promise and completes its value normally.
+Each `.load()` returns a Promise for its own result. GraphQL awaits it like any other resolver result.
+
+Passing a fresh `createContext()` result as `contextValue` scopes the loader's cache to one request. A shared instance is not automatically reset between requests.
+
+DataLoader has no dependency on GraphQL. Request-scoped loaders are an application pattern, not an execution rule. [DataLoader batch contract](https://github.com/graphql/dataloader#batch-function)
 
 ### 7. Mutation Execution
 
-#### 7.1 Side Effects in Top-Level Mutation Fields
+#### 7.1 Mutation Resolvers
 
-A top-level mutation field uses an ordinary resolver but may perform side effects, such as updating stored data:
+A top-level mutation resolver can perform side effects and return a value for normal completion:
 
 ```graphql
 type Mutation {
@@ -2110,13 +2349,17 @@ const resolvers = {
 };
 ```
 
-Here the application helper performs the update and returns the updated user. For `mutation { renameUser(id: "7", name: "Alice") { name } }`, the engine awaits that result and completes the selected `User.name` field normally.
+The application helper updates the user and returns it. Selected `User` fields then resolve normally.
 
-The permission to perform side effects applies only to top-level mutation fields. Their nested fields remain side-effect-free: selecting `User.name` must not trigger another update. Application code upholds this by convention; GraphQL.js enforces execution ordering, not resolver purity. Nested selections can reuse the same object types and field resolvers used by queries. [Mutation field behavior](https://spec.graphql.org/September2025/#sec-Normal-and-Serial-Execution)
+#### 7.2 Nested Mutation Fields
 
-#### 7.2 Serial Top-Level Fields and Nested Completion
+The permission to perform side effects applies only to top-level mutation fields. Nested fields remain side-effect-free and use normal query-style scheduling.
 
-Top-level mutation fields execute serially in collection order. Each field completes, including its selected nested fields, before the next top-level field begins:
+Nested selections can reuse the same object types and resolvers used by queries. Selecting `User.name` must not trigger another update.
+
+#### 7.3 Serial Execution
+
+Top-level mutation fields execute serially in collection order:
 
 ```graphql
 mutation {
@@ -2125,38 +2368,46 @@ mutation {
 }
 ```
 
-The first result is completed while the name is Alice, before the second update changes it to Bob. Nested fields use normal execution scheduling; serial execution applies to the mutation root, not every field beneath it. Separate mutation requests are not serialized by this rule. [Serial execution implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/execute.ts)
+The first field completes, including its selected child fields, before the second begins. Its name result is completed as `"Alice"` before the second update changes the name to `"Bob"`.
 
-#### 7.3 Failures and Transaction Boundaries
+This ordering applies within one mutation operation. It does not serialize separate requests. [Normal and serial execution](https://spec.graphql.org/September2025/#sec-Normal-and-Serial-Execution)
+
+#### 7.4 Failures and Transactions
 
 | Root mutation field failure | Effect |
 | --- | --- |
-| Nullable field | That field becomes null; later root fields execute |
-| Non-null field | Null propagates to `data`; later root fields do not execute |
+| Nullable field | Field becomes null; later root fields execute |
+| Non-null field | `data` becomes null; later root fields do not execute |
 
-If the first update succeeds and the second fails through a non-null root field, the response has `data: null`: the first field's completed result is lost, but its side effects are not rolled back. A write can also succeed before its own selected output fails during completion.
+If the first update succeeds and a non-null second field fails, `data: null` removes the first result. Its side effects remain.
 
-Serial execution is not a transaction. Use application workflow or transaction logic for dependent writes; non-null propagation is an output contract, not a reliable indication that a write did or did not commit. An application failure represented as ordinary schema data does not stop later mutation fields.
+A write can also succeed before completion of its own output fails. GraphQL does not roll back writes or provide a transaction across mutation fields.
+
+Use application workflow or transaction logic for dependent writes. Non-null propagation describes output failure, not whether a write committed. An application failure returned as ordinary data does not stop later fields.
 
 ### 8. Subscription Execution
 
-A subscription submits one operation to receive a sequence of results as application events occur. For `subscription { userUpdated { name } }`, one result might contain the name `"Alice"` and a later result `"Bob"`. Each event produces its own execution result, not a patch to the previous result.
+#### 8.1 One Operation, Multiple Results
 
-| Component | Responsibility |
-| --- | --- |
-| Application event source | Defines which events occur, when they occur, and their payloads |
-| GraphQL engine | Executes the selected fields for each event to produce a result |
-| Transport adapter | Delivers the result sequence to the client |
+A subscription submits one operation to receive a sequence of results:
 
-Declaring a subscription does not make GraphQL watch a database. The application connects an event source; sending an initial snapshot is also an application choice.
+```graphql
+subscription {
+  userUpdated { name }
+}
+```
 
-#### 8.1 Event Streams and Establishing the Source Stream
+One event might produce `"Alice"`; a later event might produce `"Bob"`. Each produces a complete execution result, not a patch to the previous result.
 
-A subscription operation must collect exactly one root field, including selections reached through fragments. Its schema root type can declare many fields, but requesting separate root streams requires separate operations. Introspection fields and `@skip`/`@include` are forbidden at the subscription root. [Subscription validation](https://spec.graphql.org/September2025/#sec-Single-Root-Field)
+The application supplies events. GraphQL executes the selection for each event. Transport code delivers the results to the client.
 
-A **source event stream** is the sequence of application payloads that will drive subscription execution. GraphQL.js represents it as an **async iterable**: a JavaScript value whose items can be consumed over time with `for await...of`. It is not a Promise for one final result or a particular network protocol.
+A subscription does not automatically watch a database or send an initial snapshot.
 
-For a subscription root field declared as `userUpdated: User`, register a stream-producing callback:
+#### 8.2 The Source Event Stream
+
+A source event stream supplies the application payloads that drive a subscription. GraphQL.js represents it as an async iterable: a JavaScript value whose items can be consumed over time.
+
+For `userUpdated: User`, register the source through the field's `subscribe` callback:
 
 ```javascript
 const resolvers = {
@@ -2168,23 +2419,17 @@ const resolvers = {
 };
 ```
 
-Here `events` is an application service and `userUpdates()` returns an async iterable. Supplying that service through context is a dependency-injection pattern. The callback can instead construct a stream directly from its arguments. The schema's `User` return type describes each event's completed field value, not the stream container.
+`events` is an application service; `userUpdates()` returns an async iterable. The callback can also return a Promise for that iterable.
 
-After registering this map in the schema, the server starts subscription processing with GraphQL.js's exported function:
+Providing the service through context is a pattern. The callback can instead construct the stream from its arguments.
 
-```javascript
-import { subscribe } from "graphql";
+The schema return type describes each event's field value, not the iterable container.
 
-const resultOrStream = await subscribe({ schema, document, contextValue });
-```
+#### 8.3 Resolving Each Event
 
-Here `document` is the parsed subscription document, already validated against `schema`, and `contextValue` supplies the event service. Like `execute()`, this API does not perform document validation. Successful setup returns a result stream; Section 8.3 distinguishes error results from rejected calls.
+Each source event becomes the root value for a new execution of the subscription selection.
 
-The exported **`subscribe()` function** starts engine processing. The registered **field `subscribe` callback** supplies the source stream and is called once during successful setup. They share a name but occupy different API layers. Section 8.2 explains how source events become response results. [GraphQL.js subscription implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/subscribe.ts)
-
-#### 8.2 Event Values as Roots for Repeated Execution
-
-Each source event becomes the root value for executing the subscription's selection set. For an application event shaped as `{ user: { name: "Alice" } }`, add a per-event resolver:
+For events shaped as `{ user: { name: "Alice" } }`, add a resolver:
 
 ```javascript
 const resolvers = {
@@ -2197,35 +2442,91 @@ const resolvers = {
 };
 ```
 
-For `subscription { userUpdated { name } }`, `resolve` receives the event, returns its user, and `User.name` receives that user as parent. Normal field resolution, value completion, and error handling produce `{"data":{"userUpdated":{"name":"Alice"}}}`. These resolvers can be asynchronous. The stream-producing callback is not called again for each event.
+| Callback | Called when | Produces |
+| --- | --- | --- |
+| `Subscription.userUpdated.subscribe` | Once during stream setup | Source event stream |
+| `Subscription.userUpdated.resolve` | For each event | User value |
+| `User.name` | During that event's field execution | Name value |
 
-If events instead contain `{ userUpdated: { name: "Alice" } }`, default field resolution can read `event.userUpdated`, so the explicit per-event resolver can be omitted. Event payload shape is an application choice.
+Normal resolution and completion produce:
 
-**Consumption and concurrency.** In GraphQL.js v16, each result iterator `.next()` independently obtains a source event and awaits its GraphQL execution. The wrapper has no queue waiting for the previous event's execution. Concurrent calls can therefore overlap executions; a consumer using `for await...of` requests them sequentially. A source async generator's own queue governs event production, not the downstream GraphQL execution. [Iterator mapping](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/mapAsyncIterator.ts)
+```json
+{ "data": { "userUpdated": { "name": "Alice" } } }
+```
 
-**Subscription lifetimes.** GraphQL.js's `subscribe()` reuses the supplied schema, operation, and context for event executions, replacing `rootValue` with each event payload. Context is not automatically recreated per event. A cache stored there can therefore last for the entire subscription; per-event isolation or refreshing must be arranged by application or framework code. A transport connection, a subscription, and an event execution are distinct scopes. [Event execution inputs](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/subscribe.ts)
+These resolvers can be asynchronous. Their results form the subscription's response stream.
 
-#### 8.3 Event Execution Errors, Stream Failure, and Cancellation
+If events contain `{ userUpdated: { name: "Alice" } }`, default field resolution can read `event.userUpdated`; the explicit `resolve` callback is unnecessary.
 
-| Failure in GraphQL.js v16 | In-process outcome |
+#### 8.4 Starting the Subscription
+
+GraphQL.js starts subscription processing through its exported `subscribe()` function:
+
+```javascript
+import { subscribe } from "graphql";
+
+const resultOrStream = await subscribe({
+  schema,
+  document,
+  contextValue: { events },
+});
+```
+
+`document` is a parsed subscription document validated against `schema`. Like `execute()`, `subscribe()` does not perform document validation.
+
+The exported function starts engine processing. It calls the registered field `subscribe` callback to obtain the source. Successful setup returns an async iterable of execution results.
+
+A subscription operation must collect exactly one root field, including selections through fragments. Its schema root type can define many fields. Introspection fields and `@skip`/`@include` are forbidden at the subscription root.
+
+#### 8.5 Consuming Results
+
+Each call to the result iterator's `.next()` obtains a source event and awaits that event's GraphQL execution.
+
+GraphQL.js v16 does not queue these calls behind the previous event's execution. Concurrent `.next()` calls can therefore overlap event executions.
+
+A `for await...of` consumer requests results sequentially. That sequencing comes from the consumer, not an execution barrier inside GraphQL.js. A source async generator's own queue governs event production only. [Result iterator implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/mapAsyncIterator.ts)
+
+#### 8.6 Subscription Lifetimes
+
+GraphQL.js reuses the supplied schema, operation, and context across event executions. Each event replaces the root value.
+
+Context is not recreated per event. A cache stored there can last for the whole subscription; per-event isolation or refreshing requires application or framework support.
+
+A transport connection, a subscription, and an event execution are distinct scopes.
+
+#### 8.7 Subscription Failures
+
+| Failure | GraphQL.js v16 outcome |
 | --- | --- |
 | Field `subscribe` callback throws or rejects | Exported `subscribe()` returns an error result instead of a stream |
-| Field resolution or completion fails for an event | That event's result contains errors and follows null propagation; the subscription does not automatically terminate |
-| Source iterator's `.next()` rejects | Result iterator's corresponding `.next()` rejects; no field-error result is generated |
+| Event resolution or completion fails | Event result contains errors and follows null propagation; later events can continue |
+| Source iterator's `.next()` rejects | Corresponding result iterator `.next()` rejects; no field-error result is generated |
 
-A setup callback failure can produce an error with a field `path` but no `data` key. That differs from document validation errors, which have no field execution path. Invalid API inputs or returning a non-iterable as the source can instead reject the exported `subscribe()` call. [Subscription error handling](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/subscribe.ts)
+A setup callback failure can produce an error with a field path but no `data` key. The presence of `data` alone does not determine whether an error has a path.
 
-An uncaught throw inside an async generator rejects its `.next()` Promise. Yielding an `Error` object is different: it supplies an event value. Normal stream completion returns `done: true`.
+Invalid API inputs or a non-iterable source can instead reject the exported `subscribe()` call. [Subscription implementation](https://github.com/graphql/graphql-js/blob/16.x.x/src/execution/subscribe.ts)
 
-Calling the result iterator's `.return()` forwards cancellation to the source's `.return()` when present. The source owns resource cleanup; this does not automatically cancel resolver I/O already in progress. Section 9.5 follows these outcomes across the network boundary.
+An uncaught throw in an async generator rejects its `.next()` Promise. Yielding an `Error` object supplies an event value; it does not reject the iterator call.
+
+#### 8.8 Completion and Cancellation
+
+Normal iterator completion returns `done: true`.
+
+Calling the result iterator's `.return()` forwards cancellation to the source's `.return()` when present. The source performs resource cleanup.
+
+Cancellation does not automatically stop resolver I/O already in progress. Delivering completion and failures over the network requires a transport adapter.
 
 ### 9. Connecting Execution to the Client
 
-#### 9.1 Receiving a Request and Invoking the Engine
+#### 9.1 Transport Adapters
 
-**GraphQL over HTTP** is a protocol specification, currently a draft, not a library. It defines request parameters, HTTP methods, media types, and response behavior. Server frameworks or application handlers implement the adapter between that protocol and the engine API.
+A transport adapter connects network requests and responses to the engine's in-process API. It can be supplied by a server framework or application code.
 
-For example:
+For a query or mutation, the adapter decodes a request, invokes the engine, and serializes the result. For a subscription, it also carries a sequence of results and handles stream termination.
+
+#### 9.2 GraphQL over HTTP
+
+GraphQL over HTTP is a draft protocol specification for carrying queries and mutations over HTTP. It defines request parameters, methods, media types, and responses. It is separate from core GraphQL and is not a library.
 
 ```http
 POST /graphql HTTP/1.1
@@ -2235,11 +2536,11 @@ Accept: application/graphql-response+json
 {"query":"query GetUser($id: ID!) { user(id: $id) { name } }","operationName":"GetUser","variables":{"id":"7"}}
 ```
 
-After decoding and checking the request parameters, the adapter maps them to GraphQL.js:
+The parameter is named `query` even for mutations. An optional `extensions` map carries implementation-specific request metadata.
+
+After decoding and checking the request, the adapter maps its parameters to GraphQL.js:
 
 ```javascript
-import { graphql } from "graphql";
-
 const result = await graphql({
   schema,
   source: body.query,
@@ -2249,23 +2550,29 @@ const result = await graphql({
 });
 ```
 
-`body` is the decoded request. The server supplies its prepared executable `schema`, application service `database`, and authenticated identity `currentUser`. The transport first parses JSON; the engine then parses the GraphQL text inside `query`. The parameter is named `query` even when it contains a mutation. [HTTP request format](https://http-spec.graphql.org/draft/#sec-Request)
+`body` is the decoded request. The server supplies the schema, services, and authenticated user.
 
-POST support is required by the HTTP draft; GET support is optional and cannot execute mutations. GET places the parameters in the URL query string. `variables` and `extensions` are JSON-serialized and then URL-encoded; the GraphQL document string is URL-encoded directly.
+The adapter parses JSON; the engine parses the GraphQL text inside `query`.
 
-| Header | JSON protocol use |
+#### 9.3 Methods and Media Types
+
+| HTTP draft feature | Behavior |
 | --- | --- |
-| POST request `Content-Type` | `application/json`; servers must support UTF-8 JSON requests |
-| Client `Accept` | Includes `application/graphql-response+json`; can also advertise legacy `application/json` responses |
-| Response `Content-Type` | Identifies the format selected by the server |
+| POST | Required; carries parameters in the request body |
+| GET | Optional; carries parameters in the URL and cannot execute mutations |
+| Request `Content-Type` | `application/json` for JSON requests; UTF-8 support is required |
+| Client `Accept` | Includes `application/graphql-response+json`; can also advertise legacy `application/json` |
+| Response `Content-Type` | Identifies the selected representation |
 
-Additional serialization formats are permitted, while parameter names and semantics remain the same. The GraphQL document remains a string and variables remain a map. GET's prescribed URL encoding is separate from POST body encoding. [Serialization rules](https://http-spec.graphql.org/draft/#sec-Serialization-Format)
+For GET, JSON-serialize `variables` and `extensions`, then URL-encode the parameters. Encode the GraphQL document as a string.
 
-#### 9.2 Authorization and Execution Limits
+Additional serialization formats are permitted; parameter names and semantics stay the same. [HTTP request rules](https://http-spec.graphql.org/draft/#sec-Request)
 
-Authentication establishes the identity supplied in context; application authorization decides which actions or data it permits. GraphQL's standard validation rules do not establish permission.
+#### 9.4 Authorization
 
-The same field can be reached through different paths:
+GraphQL validation does not establish permission. Application authorization determines which fields and data the caller can access.
+
+A field can be reached through several paths:
 
 ```graphql
 {
@@ -2274,7 +2581,7 @@ The same field can be reached through different paths:
 }
 ```
 
-A check in `Query.user` alone does not protect the second path. One application pattern is to call a service that enforces the policy from `User.email`:
+A check in `Query.user` alone does not protect the second path. Both paths can use a policy enforced by a service called from `User.email`:
 
 ```javascript
 const resolvers = {
@@ -2285,22 +2592,24 @@ const resolvers = {
 };
 ```
 
-Both paths use that resolver. The service's permission policy also applies to callers outside GraphQL. If it throws, normal field-error handling and null propagation apply; permission denial does not inherently terminate the entire operation. [Authorization strategies](https://www.graphql-js.org/docs/authorization-strategies/)
+This is an application pattern. If the service throws, field-error handling and null propagation determine the result; denial does not inherently terminate the whole operation.
 
-**Work limits.** Validity and batching do not bound total work. Selecting 100 users and 100 posts per user can require processing 10,000 posts even when database calls are batched.
+#### 9.5 Execution Limits
+
+A valid operation can still require excessive work. Selecting 100 users and 100 posts per user can process 10,000 posts even with batching.
 
 | Control | Enforcement point |
 | --- | --- |
-| Request-body size | Transport handling, before GraphQL parsing |
-| Document depth or estimated cost | Document analysis before field execution |
-| Maximum page/list size | Argument policy and data-fetching implementation |
-| Execution deadline | Runtime coordination with resolvers and downstream services |
+| Request size | Transport handling |
+| Document depth or estimated cost | Analysis before field execution |
+| Maximum page/list size | Argument policy and data fetching |
+| Execution deadline | Runtime coordination with resolvers and services |
 
-GraphQL.js v16 does not automatically impose application depth, cost, or execution-time limits. Additional validation rules or analysis can estimate work; depth alone does not capture list expansion or field cost. Deadline enforcement and cancellation of active I/O require server and service support. [Operation complexity controls](https://www.graphql-js.org/docs/operation-complexity-controls/)
+GraphQL.js v16 does not impose these application limits automatically. Depth alone does not account for list expansion or expensive fields. Cancelling active I/O requires support from the services involved.
 
-#### 9.3 Returning a Query or Mutation Result
+#### 9.6 HTTP Results
 
-The adapter serializes the engine's result and writes the HTTP response:
+The adapter serializes the engine result:
 
 ```http
 HTTP/1.1 200 OK
@@ -2309,23 +2618,19 @@ Content-Type: application/graphql-response+json; charset=utf-8
 {"data":{"user":{"name":"Alice"}}}
 ```
 
-The client decodes the response into its own local value. A client can be ordinary `fetch()` code that understands the protocol; a dedicated GraphQL client library is not required.
+A client can be ordinary `fetch()` code that understands the protocol. A dedicated GraphQL client library is optional.
 
-| Outcome | HTTP draft's response model |
-| --- | --- |
-| Execution succeeds without errors | `200` with a GraphQL data result |
-| Field errors with surviving data | A `2xx` response containing both `data` and `errors` |
-| Request cannot execute, or server cannot handle it | Appropriate `4xx` or `5xx` |
+HTTP success does not imply error-free GraphQL data. Execution errors can arrive in a `2xx` response with both `data` and `errors`.
 
-A successful HTTP status does not establish error-free GraphQL data. A non-success status can still carry a GraphQL error result: `application/graphql-response+json` identifies that representation, whereas an intermediary's error response might have a different body format. [Response semantics](https://http-spec.graphql.org/draft/#sec-Response)
+Exact status policies depend on the media type, protocol revision, and adapter. With `application/graphql-response+json`, an error status can still carry a GraphQL result. [HTTP response rules](https://http-spec.graphql.org/draft/#sec-Status-Codes)
 
-Exact status policies vary with protocol revision and implementation. The draft inspected on 2026-09-10 recommends `294` when a result contains both `data` and `errors`, including `data: null`; the inspected `graphql-http` implementation returns `200` for execution results. Neither policy changes GraphQL null propagation or the result's `errors` entries. [Draft status rules](https://http-spec.graphql.org/draft/#sec-Status-Codes), [Adapter status mapping](https://github.com/graphql/graphql-http/blob/master/src/handler.ts)
+Exceptions outside GraphQL's result handling reach the server's error handler, which chooses the public response.
 
-Unexpected exceptions outside GraphQL's result handling reach the server integration's error handler, which chooses a public response. Exception objects and stack traces are not automatically sent over HTTP.
+#### 9.7 Subscription Results over SSE
 
-#### 9.4 Streaming Subscription Results over HTTP
+GraphQL over Server-Sent Events (SSE) is one subscription transport protocol. The `graphql-sse` library implements it.
 
-**GraphQL over Server-Sent Events (SSE)** is one subscription delivery protocol, implemented by `graphql-sse`. Its *distinct connections mode* associates one operation with each HTTP response stream. It extends the HTTP example by requesting a streaming response:
+Its **distinct connections mode** associates one operation with each HTTP response stream:
 
 ```http
 POST /graphql HTTP/1.1
@@ -2335,7 +2640,7 @@ Accept: text/event-stream
 {"query":"subscription { userUpdated { name } }"}
 ```
 
-The adapter consumes GraphQL.js's result iterator and writes each result as JSON inside an SSE event:
+The adapter consumes the result iterator and writes each GraphQL result as JSON in an SSE event:
 
 ```http
 HTTP/1.1 200 OK
@@ -2352,30 +2657,34 @@ data:
 
 ```
 
-Blank lines delimit events. `complete` signals normal completion; an open subscription keeps the response streaming. The client parses the SSE framing and decodes each GraphQL result. The server's async iterator remains server-side. [SSE protocol](https://github.com/enisdenjo/graphql-sse/blob/master/PROTOCOL.md)
+Blank lines delimit events. `next` carries a result; `complete` signals normal completion. The client decodes the events; the server-side iterator is not transmitted. [GraphQL over SSE protocol](https://github.com/enisdenjo/graphql-sse/blob/master/PROTOCOL.md)
 
-Core GraphQL defines response-stream semantics, not universal wire messages named `subscribe`, `next`, and `complete`. The protocols choose their representations:
+#### 9.8 Transport Protocol Choices
+
+Core GraphQL defines response-stream semantics, not universal wire messages. Each transport protocol defines its own exchange:
 
 | Action | SSE distinct mode | `graphql-transport-ws` over WebSocket |
 | --- | --- | --- |
-| Start operation | HTTP request | `subscribe` message |
-| Deliver result | `next` SSE event | `next` message |
-| Normal completion | `complete` SSE event | `complete` message |
-| Cancel from client | Cancel HTTP response stream | `complete` message |
+| Start | HTTP request | `subscribe` message |
+| Result | `next` event | `next` message |
+| Normal completion | `complete` event | `complete` message |
+| Client cancellation | Cancel HTTP response stream | `complete` message |
 
-The WebSocket protocol uses operation IDs to multiplex operations on one connection. SSE's distinct mode needs no operation ID because the response stream identifies the operation; its single connection mode adds multiplexing. An HTTP response stream is not necessarily a separate network connection. [WebSocket protocol](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md)
+The WebSocket protocol uses operation IDs to multiplex operations. SSE distinct mode uses the response stream to identify the operation; SSE's single connection mode adds multiplexing.
 
-#### 9.5 Carrying Failures and Cancellation Across the Boundary
+An HTTP response stream is not necessarily a separate network connection. [WebSocket protocol](https://github.com/enisdenjo/graphql-ws/blob/master/PROTOCOL.md)
+
+#### 9.9 Subscription Failures over SSE
 
 With `graphql-sse` in distinct connections mode:
 
-| Engine outcome | Adapter behavior |
+| Engine outcome | Delivery |
 | --- | --- |
-| Setup returns a GraphQL error result | Send a `next` event containing `errors`, then `complete` |
-| Event execution returns `data` and `errors` | Send that result in a `next` event; later events can continue |
-| Source iterator rejects | Propagate failure through the server's stream-handling code; do not automatically generate a GraphQL error event |
+| Setup returns an error result | `next` containing `errors`, then `complete` |
+| Event execution returns errors | `next` containing the result; later events can continue |
+| Source iterator rejects | Failure reaches server stream handling; no automatic GraphQL error event |
 
-For example, a setup callback failure can produce:
+A setup failure can therefore produce:
 
 ```text
 event: next
@@ -2386,8 +2695,12 @@ data:
 
 ```
 
-`next` carries a GraphQL result, not a guarantee of successful data. This adapter also sends document validation errors through SSE, but rejects malformed request JSON or GraphQL syntax with an ordinary `400` response before streaming. [SSE error handling](https://github.com/enisdenjo/graphql-sse/blob/master/src/handler.ts)
+This adapter also sends document validation errors through SSE. Malformed JSON or GraphQL syntax produces an ordinary `400` response before streaming. [SSE handler](https://github.com/enisdenjo/graphql-sse/blob/master/src/handler.ts)
 
-With the Node HTTP adapter, a source iterator rejection rejects the server handler's Promise. Application error handling must catch it and close or destroy the response. Once headers have been sent, it cannot replace the status with `500`. The client observes stream failure or premature closure, not the original server exception; `graphql-sse` creates a local connection error when the response ends with an operation still active. [Node adapter](https://github.com/enisdenjo/graphql-sse/blob/master/src/use/http.ts), [Client handling](https://github.com/enisdenjo/graphql-sse/blob/master/src/client.ts)
+With its Node HTTP adapter, a source rejection rejects the handler's Promise. Application error handling must close or destroy the response. The client observes a stream failure, not the original server exception. [Node adapter](https://github.com/enisdenjo/graphql-sse/blob/master/src/use/http.ts)
 
-Cancellation uses the reverse integration path: cancelling the client's HTTP stream causes the adapter to close its iterator, which propagates through GraphQL.js to source cleanup. Reconnecting starts a new subscription execution. Replay of missed events requires an application mechanism; reconnecting alone does not provide it.
+#### 9.10 Subscription Cancellation
+
+Cancelling the client's HTTP stream causes the adapter to close its iterator, forwarding cancellation through GraphQL.js to source cleanup.
+
+Reconnecting starts a new subscription. Replaying missed events requires an application mechanism.
