@@ -16,17 +16,29 @@ Use plain, simplified technical English. Prefer the shortest set of statements n
 
 Do not add filler, rhetorical flourishes, motivational language, jokes, or stylistic embellishment.
 
-Repeat information only when applying it in a new context or deliberately reinforcing understanding or retention. A new chapter is not, by itself, a reason to repeat earlier material.
-
 A section may be one sentence when one sentence is sufficient. Do not expand a section merely to make it feel complete.
 
 Do not sacrifice important information for brevity. The goal is **minimum necessary text**, not minimum text.
+
+### Sentences
+
+* Use short, direct sentences. Keep related clauses together when they express a relationship more clearly than separate sentences.
+* Prefer direct verbs and familiar technical language. Remove wording that adds length without adding meaning.
+* Make clear what each statement refers to. Repeat a name when needed to avoid ambiguity.
+
+### Passages
+
+Begin directly with the concept, rule, or example being taught. A code example or table may introduce the point without an opening sentence. Add only the explanation needed to understand it. Do not include conversational text or repeated conclusions.
+
+Keep each passage focused on one teaching purpose. Group details by what the reader needs to understand together.
+
+Give each fact one primary home. Refer to that explanation when needed. Repeat information only when applying it in a new context or deliberately reinforcing understanding or retention. A new chapter is not, by itself, a reason to repeat earlier material.
 
 ## Learning Approach
 
 Build the reader's mental model incrementally.
 
-Introduce each concept before relying on it.
+Establish what each new concept is and what role it serves before relying on it in another explanation or example. Naming a concept or showing its syntax does not establish that understanding.
 
 Do not introduce several independent concepts in one section when they can be taught separately.
 
@@ -167,13 +179,15 @@ When useful, distinguish:
 * Required behavior vs. optional behavior
 * Core functionality vs. external systems
 
-Do not describe a convention as a requirement.
-
 Do not describe an implementation detail as part of the abstract model.
 
 Do not simplify away an important distinction merely to make a statement shorter.
 
 When something is standardized at one layer but flexible at another, state the boundary explicitly.
+
+Do not present a convention or implementation choice as a requirement of a specification.
+
+Make clear whether behavior is required or optional.
 
 ## Mental Models
 
@@ -193,13 +207,9 @@ Do not force a slogan or formula when the subject requires more nuance.
 
 ## Terminology
 
-Use the established terminology of the subject.
+Use the subject's established terms and the names used by the system being described. Use one term per concept; do not introduce synonyms for variety.
 
-Do not invent alternative terminology when a standard term exists.
-
-Define abbreviations before using them.
-
-Once terminology has been established within a book, use it consistently.
+Define new technical terms and abbreviations before relying on them. Prefer direct definitions such as "X is Y." Account for the intended reader's prior knowledge and terms established earlier in the guide.
 
 If a convenient shorthand is introduced for the purpose of the notes, explicitly define what it means and use it consistently.
 
@@ -220,6 +230,14 @@ End chapters with a concise summary only when it provides a useful reference or 
 A summary should synthesize the chapter rather than repeat it.
 
 Use a table, diagram, or a few compact statements when those communicate the summary more efficiently than prose.
+
+## Revision and Review
+
+Use feedback to improve the explanation and its progression. The revised text must stand alone without requiring the reader to know the discussion that produced it.
+
+When a claim changes, replace the old explanation. Do not append a qualification that requires the reader to reconcile both versions.
+
+Before delivery, review the writing against this standard as well as checking accuracy and coverage. Revise organization as needed; sentence edits alone cannot fix a structural problem.
 
 ## Overall Standard
 
