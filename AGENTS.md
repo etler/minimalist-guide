@@ -1,10 +1,10 @@
-# The Minimalist's Guide Writing Standard
+# The Minimalist Guide Writing Standard
 
-Use this standard whenever creating a book in the **The Minimalist's Guide** series.
+Use this standard whenever creating a book in the **The Minimalist Guide** series.
 
 The series format is:
 
-> **The Minimalist's Guide to [Topic]**
+> **The Minimalist Guide to [Topic]**
 
 These are compact technical learning notes designed to build a precise mental model quickly and serve as a reference that can be shared with others.
 
@@ -87,7 +87,7 @@ After approval, use the approved outline as the starting structure, but collapse
 
 The document title is always:
 
-# The Minimalist's Guide to [Topic]
+# The Minimalist Guide to [Topic]
 
 Each chapter uses a second-level heading:
 

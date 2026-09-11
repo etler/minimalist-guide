@@ -1,4 +1,4 @@
-# The Minimalist's Guide to GraphQL
+# The Minimalist Guide to GraphQL
 
 ## Chapter 1 — The Core Model and Its Boundaries
 
